@@ -114,7 +114,28 @@ function parseKey(key: string): { key_root: string; key_quality: 'major' | 'mino
 }
 
 function mapGenre(genre: string): string {
-  return GENRE_MAP[genre.toLowerCase()] ?? 'Synthwave';
+  const lower = genre.toLowerCase();
+  
+  // Exact match first
+  if (GENRE_MAP[lower]) return GENRE_MAP[lower];
+  
+  // Keyword matches
+  if (lower.includes('synth') || lower.includes('wave')) return 'Synthwave';
+  if (lower.includes('lo-fi') || lower.includes('lofi') || lower.includes('lo fi')) return 'Lo Fi';
+  if (lower.includes('ambient') || lower.includes('cinematic')) return 'Ambient';
+  if (lower.includes('edm') || lower.includes('electronic')) return 'EDM';
+  if (lower.includes('house')) return 'House';
+  if (lower.includes('hiphop') || lower.includes('hip-hop') || lower.includes('hip hop') || lower.includes('rap')) return 'Hip Hop';
+  if (lower.includes('trap')) return 'Trap Half Tempo';
+  if (lower.includes('techno')) return 'Techno';
+  if (lower.includes('rock') || lower.includes('metal') || lower.includes('punk') || lower.includes('guitar')) return 'Rock';
+  if (lower.includes('reggaeton')) return 'Reggaeton';
+  if (lower.includes('dnb') || lower.includes('drum')) return "Drum 'n' Bass";
+  if (lower.includes('down') || lower.includes('trip')) return 'Downtempo';
+  if (lower.includes('epic') || lower.includes('score') || lower.includes('anthem') || lower.includes('orchestral') || lower.includes('patriotic')) return 'Epic Score';
+  if (lower.includes('zen') || lower.includes('relax')) return 'Zen';
+  
+  return 'Synthwave';
 }
 
 // ── Build multipart/form-data body ───────────────────────────────────────────
@@ -311,11 +332,18 @@ export class LoudlyService {
 
   private simulatedResponse(input: LoudlyCompositionInput): LoudlyResult {
     const DEMO: Record<string, string> = {
-      synthwave: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
-      'lo fi':   'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3',
-      ambient:   'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3',
-      rock:      'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3',
-      jazz:      'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
+      'synthwave':       'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
+      'lo fi':           'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3',
+      'ambient':         'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3',
+      'rock':            'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3',
+      'hip hop':         'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-6.mp3',
+      'trap half tempo': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-7.mp3',
+      'edm':             'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-10.mp3',
+      'house':           'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-12.mp3',
+      'epic score':      'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-15.mp3',
+      "drum 'n' bass":   'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-16.mp3',
+      'downtempo':       'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3',
+      'zen':             'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-14.mp3',
     };
 
     const slug = mapGenre(input.genre).toLowerCase();
