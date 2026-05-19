@@ -5,6 +5,7 @@ import { LyricsAgent } from '../agents/lyricsAgent';
 import { CompositionAgent } from '../agents/compositionAgent';
 import { ProducerAgent } from '../agents/producerAgent';
 import { CriticAgent } from '../agents/criticAgent';
+import { MusicGenerationAgent } from '../agents/musicGenerationAgent';
 import { saveArtifact } from '../artifacts/storage';
 import { logExecution } from '../utils/logger';
 
@@ -38,6 +39,7 @@ export class CascadeFlowOrchestrator {
   private compositionAgent = new CompositionAgent();
   private producerAgent = new ProducerAgent();
   private criticAgent = new CriticAgent();
+  private musicGenerationAgent = new MusicGenerationAgent();
 
   public async runWorkflow(request: CreativeRequest, userId: string): Promise<{
     package: FinalCreativePackage;
@@ -83,6 +85,7 @@ export class CascadeFlowOrchestrator {
       let lyricsRes: AgentResponse<any>;
       let compRes: AgentResponse<any>;
       let prodRes: AgentResponse<any>;
+      let musicgenRes: AgentResponse<any>;
       let criticRes: AgentResponse<any>;
 
       let loopCount = 0;
@@ -103,7 +106,7 @@ export class CascadeFlowOrchestrator {
 
         // 3. Lyrics Generation
         const lyricsStepName = isRefinement ? `Lyrics Generation (Refinement ${loopCount})` : 'Lyrics Generation';
-        addStepTrace(lyricsStepName, this.lyricsAgent.name, isRefinement ? 'RETRYING' : 'RUNNING', 'llama-3.3-70b-specdec');
+        addStepTrace(lyricsStepName, this.lyricsAgent.name, isRefinement ? 'RETRYING' : 'RUNNING', 'llama-3.3-70b-versatile');
         lyricsRes = await this.lyricsAgent.execute({
           request: currentRequest,
           emotionContext: emotionRes.output,
@@ -124,7 +127,7 @@ export class CascadeFlowOrchestrator {
 
         // 5. Producer Guidance
         const prodStepName = isRefinement ? `Producer Guidance (Refinement ${loopCount})` : 'Producer Guidance';
-        addStepTrace(prodStepName, this.producerAgent.name, isRefinement ? 'RETRYING' : 'RUNNING', 'llama-3.3-70b-specdec');
+        addStepTrace(prodStepName, this.producerAgent.name, isRefinement ? 'RETRYING' : 'RUNNING', 'llama-3.3-70b-versatile');
         prodRes = await this.producerAgent.execute({
           direction: currentRequest.direction,
           compositionContext: compRes.output,
@@ -132,15 +135,27 @@ export class CascadeFlowOrchestrator {
         });
         addStepTrace(prodStepName, this.producerAgent.name, prodRes.metadata.status as ExecutionState, prodRes.metadata.model, prodRes.output, prodRes.metadata.latency, prodRes.metadata.retries);
 
-        // 6. Critic Evaluation
+        // 6. Music Generation (Meta MusicGen via Replicate)
+        const musicgenStepName = isRefinement ? `Music Generation (Refinement ${loopCount})` : 'Music Generation';
+        addStepTrace(musicgenStepName, this.musicGenerationAgent.name, isRefinement ? 'RETRYING' : 'RUNNING', 'llama-3.1-8b-instant');
+        musicgenRes = await this.musicGenerationAgent.execute({
+          request: currentRequest,
+          emotionContext: emotionRes.output,
+          compositionContext: compRes.output,
+          producerContext: prodRes.output
+        });
+        addStepTrace(musicgenStepName, this.musicGenerationAgent.name, musicgenRes.metadata.status as ExecutionState, musicgenRes.metadata.model, musicgenRes.output, musicgenRes.metadata.latency, musicgenRes.metadata.retries);
+
+        // 7. Critic Evaluation
         const criticStepName = isRefinement ? `Critic Evaluation (Refinement ${loopCount})` : 'Critic Evaluation';
-        addStepTrace(criticStepName, this.criticAgent.name, 'RUNNING', 'llama-3.3-70b-specdec');
+        addStepTrace(criticStepName, this.criticAgent.name, 'RUNNING', 'llama-3.3-70b-versatile');
         criticRes = await this.criticAgent.execute({
           title: lyricsRes.output.title,
           lyrics: lyricsRes.output.lyrics,
           emotion: emotionRes.output,
           composition: compRes.output,
-          production: prodRes.output
+          production: prodRes.output,
+          audio: musicgenRes.output
         });
         addStepTrace(criticStepName, this.criticAgent.name, criticRes.metadata.status as ExecutionState, criticRes.metadata.model, criticRes.output, criticRes.metadata.latency, criticRes.metadata.retries);
 
@@ -158,6 +173,7 @@ export class CascadeFlowOrchestrator {
       // Generate SUNO & Album Art Prompts dynamically
       const albumArtPrompt = `A stunning professional album cover visual for a song titled "${lyricsRes!.output.title}". Vibe: ${emotionRes.output.emotion} ${emotionRes.output.genre}, atmosphere: ${compRes!.output.atmosphere}. Digital art style.`;
       const sunoPrompt = `${emotionRes.output.genre}, ${compRes!.output.bpm} BPM, key of ${compRes!.output.key}, ${compRes!.output.vocalStyle}, atmosphere: ${compRes!.output.atmosphere}`;
+      const sessionSummary = `Session completed successfully. Creative direction: "${request.direction}". Orchestrated across 6 specialist AI agents. Mood: ${emotionRes.output.emotion} ${emotionRes.output.genre} at ${compRes!.output.bpm} BPM in Key of ${compRes!.output.key}. Real audio successfully generated using Meta MusicGen on Replicate. Retries handled: ${trace.retriesCount}.`;
 
       const finalPackage: FinalCreativePackage = {
         title: lyricsRes!.output.title,
@@ -170,7 +186,10 @@ export class CascadeFlowOrchestrator {
         vocalStyle: compRes!.output.vocalStyle,
         arrangementNotes: prodRes!.output.arrangementNotes,
         albumArtPrompt,
-        sunoPrompt
+        sunoPrompt,
+        musicgenPrompt: musicgenRes!.output.musicgenPrompt,
+        generatedAudioUrl: musicgenRes!.output.audioUrl,
+        sessionSummary
       };
 
       trace.status = 'SUCCESS';

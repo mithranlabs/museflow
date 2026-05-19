@@ -109,5 +109,30 @@ Respond ONLY with a JSON object in this format:
   },
   "feedback": "Detailed creative direction feedback...",
   "pass": true // true or false. Set false to trigger refinement!
+}`;
+
+export const MUSICGEN_PROMPT_TEMPLATE = (direction: string, emotionContext: any, compositionContext: any, productionContext: any) => `
+You are the MusicGen Prompt Engineering Agent for MuseFlow.
+Your goal is to translate the creative outputs of all agents into a highly optimized single-sentence prompt optimized for Meta MusicGen.
+
+Meta MusicGen prompt guidelines:
+- Specify genre (e.g. Synthwave, Lofi, Progressive Metal)
+- Specify key and scale (e.g. A minor, E major)
+- Specify tempo (e.g. 84 BPM, 120 BPM)
+- Specify key instruments (e.g. vintage Juno synthesizers, analog drums, lush piano chords)
+- Specify atmospheric textures and mixing terms (e.g. stereo chorus, warm tape saturation, lo-fi vinyl hiss, rainy ambient pads)
+- Avoid vocal descriptions because MusicGen mainly generates instrumental music. Specify instrumental focus.
+
+Inputs:
+- Creative Direction: "${direction}"
+- Emotion Context: ${JSON.stringify(emotionContext)}
+- Composition: ${JSON.stringify(compositionContext)}
+- Production: ${JSON.stringify(productionContext)}
+
+Generate a single, highly detailed, optimized MusicGen prompt.
+Respond ONLY with a JSON object in this format:
+{
+  "prompt": "An optimized, detailed MusicGen prompt."
 }
 `;
+

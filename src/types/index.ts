@@ -45,4 +45,7 @@ export interface FinalCreativePackage {
   arrangementNotes: string;
   albumArtPrompt: string;
   sunoPrompt: string;
+  musicgenPrompt: string;
+  generatedAudioUrl: string;
+  sessionSummary: string;
 }

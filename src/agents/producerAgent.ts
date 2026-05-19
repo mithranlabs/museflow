@@ -17,7 +17,7 @@ interface ProducerAgentOutput {
 
 export class ProducerAgent extends BaseAgent<ProducerAgentInput, ProducerAgentOutput> {
   constructor() {
-    super('ProducerAgent', 'llama-3.3-70b-specdec');
+    super('ProducerAgent', 'llama-3.3-70b-versatile');
   }
 
   protected async process(input: ProducerAgentInput): Promise<ProducerAgentOutput> {

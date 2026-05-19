@@ -7,6 +7,7 @@ interface CriticAgentInput {
   emotion: any;
   composition: any;
   production: any;
+  audio?: any;
 }
 
 interface CriticAgentOutput {
@@ -25,7 +26,7 @@ export class CriticAgent extends BaseAgent<CriticAgentInput, CriticAgentOutput> 
   private static runCount = 0;
 
   constructor() {
-    super('CriticAgent', 'llama-3.3-70b-specdec');
+    super('CriticAgent', 'llama-3.3-70b-versatile');
   }
 
   protected async process(input: CriticAgentInput): Promise<CriticAgentOutput> {

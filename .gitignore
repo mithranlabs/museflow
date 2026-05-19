@@ -4,3 +4,5 @@ dist
 artifacts
 logs
 coverage
+*.mp3
+*.wav
