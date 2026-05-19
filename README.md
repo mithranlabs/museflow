@@ -18,101 +18,81 @@ Utilizing `@vectorize-io/hindsight-client`, MuseFlow features deep, session-tran
 * **Retain**: After a song is successfully completed, the final metadata, user feedback, and composition settings are written back to the memory graph.
 * **Local JSON Fallback**: If no API key is present, it transparently falls back to file-based persistent memory under the `/artifacts/memory/` directory.
 
-### 3. Atmospheric Vocal Layering Pipeline
-Synthesizes and mixes convincing, moody ambient vocals into the instrumental music:
-* **Vocal Styling Agent**: Creative direction agent that designs specific effects chains (reverb size, delay type, chorus) and extracts high-impact phrase fragments (hooks) from the lyrics.
-* **Vocal Generation**: Combines the styling instructions with Hugging Face Suno Bark (using `♪` markers to trigger singing) or ElevenLabs, falling back to clean local speech assets with natural pause tokens (`. ... `).
-* **Complex FFmpeg Mixing**: Runs a multi-stage DSP chain including Haas stereo widening (25ms delay offset), bandpass filters (250Hz to 3.5kHz), chorus modulation, staggered multi-tap echos, and sidechain compression vocal ducking.
-
-### 4. Image Generation (Album Cover Art)
-Generates high-resolution album cover art corresponding to the style, genre, and atmosphere of the session:
-* **FLUX.1-schnell**: Generates covers via the Hugging Face serverless API.
-* **Pollinations.ai Fallback**: Provides a lightning-fast, keyless, and free fallback if Hugging Face tokens are not configured.
-
-### 5. Telemetry & Observability
-Every session writes a detailed, JSON-serialized execution trace containing:
-* Precise latency metrics per step.
-* Model selection and confidence metadata.
-* Retries and escalation triggers.
-* Aggregate stats (success rates, average latency, total executions) served via `/api/telemetry`.
+### 3. Real-Time Telemetry & SSE Event Streaming
+* **Server-Sent Events (SSE)**: Streams progressive orchestration steps, latency updates, and active agent statuses directly from the backend to the UI.
+* **Interactive Logs Console**: View live trace files, token speed, and agent actions in real time as the creative brain thinks.
 
 ---
 
-## 📐 System Architecture
+## 🚀 Quick Start & Installation
 
-```mermaid
-flowchart TD
-    A[POST /api/orchestrate] --> B[CascadeFlowOrchestrator]
-    
-    subgraph Memory Context
-        B --> C[Hindsight Recall & Reflect]
-    end
-    
-    subgraph Orchestration Steps (CascadeFlow)
-        C --> D[1. Emotion Analysis]
-        D --> E[2. Memory Synthesis]
-        E --> F[3. Lyrics Generation]
-        F --> G[4. Composition Planning]
-        G --> H[5. Producer Guidance]
-        H --> I[5.5. Vocal Styling]
-        I --> J[6. Music Generation - Loudly]
-        J --> K[6.5. Vocal Gen & FX Mix - FFmpeg]
-    end
-    
-    subgraph Critic, Retain & Art Loop
-        K --> L[7. Critic Evaluation]
-        L -->|Score < Threshold & Retries Left| F
-        L -->|Passed / Exhausted| M[8. Hindsight Retain]
-        M --> N[9. Album Art Generation]
-    end
-    
-    N --> O[Final Creative Package + Audit Trace]
+### 1. Clone the Repository
+```bash
+git clone https://github.com/mithranlabs/museflow.git
+cd museflow
 ```
 
----
-
-## 🚀 Quick Start
-
-### 1. Installation
-Install project dependencies:
+### 2. Backend Setup
+Install root dependencies and configure environment:
 ```bash
+# Install dependencies
+npm install
+
+# Copy environment template
+cp .env.example .env
+```
+Open `.env` and fill in your keys:
+```env
+PORT=3001
+GROQ_API_KEY=gsk_...
+HINDSIGHT_API_KEY=hsk_... # Optional fallback to local JSON
+LOUDLY_API_KEY=your_key  # Optional fallback to simulated audio
+HF_TOKEN=hf_...          # Optional fallback to pollinations
+```
+
+### 3. Frontend Setup
+Navigate to the frontend React folder and install dependencies:
+```bash
+cd museflow-frontend
 npm install
 ```
-
-### 2. Configuration
-Create a `.env` file in the root directory (using `.env.example` as a template):
+*(Optional)* Create a `.env` file in the `museflow-frontend` directory if you want to override the default API base URL:
 ```env
-GROQ_API_KEY=gsk_...
-HINDSIGHT_API_KEY=hsk_...
-LOUDLY_API_KEY=your_loudly_key
-HF_TOKEN=your_huggingface_token
-PORT=3001
+VITE_API_BASE_URL=http://localhost:3001/api
 ```
 
-### 3. Run the Server
-Start the development server with live watch support:
+---
+
+## 📡 Running the Platform
+
+To run the application, start both the backend server and frontend development client in parallel:
+
+### Start Backend Orchestration Server
+In the root directory:
 ```bash
 npm run dev
 ```
+The server starts on `http://localhost:3001` and watches for backend changes.
+
+### Start Frontend Client
+In a separate terminal, navigate to the `museflow-frontend` directory:
+```bash
+npm run dev
+```
+The client starts on `http://localhost:5173`. Open `http://localhost:5173/studio` in your browser.
 
 ---
 
-## 📡 API Endpoints
+## 📐 System API Endpoints
 
 | Method | Endpoint | Description |
 |---|---|---|
-| **POST** | `/api/orchestrate` | Generate a complete song, album cover, and execution trace |
+| **POST** | `/api/orchestrate/stream` | Stream progressive multi-agent orchestration events using SSE |
+| **POST** | `/api/orchestrate` | Generate a complete song, album cover, and execution trace synchronously |
 | **GET** | `/api/history` | List all historical execution logs |
 | **GET** | `/api/telemetry` | Retrieve performance metrics and success rates |
+| **GET** | `/api/user/songs` | Fetch saved songs library |
+| **POST** | `/api/user/songs/save` | Add a generated song package to library |
 | **GET** | `/api/memory/:userId` | Get current memory data for a user |
-| **POST** | `/api/memory/:userId/reflect` | Manually trigger Hindsight reflection and profiles |
-| **POST** | `/api/memory/:userId/retain` | Manually save a new musical observation |
+| **POST** | `/api/memory/:userId/reflect` | Manually trigger Hindsight reflection |
 | **GET** | `/health` | Server status and integration health check |
-
----
-
-## 🔮 Future Roadmap
-
-1. **Multi-Track Stem Mixing**: Support splitting backing tracks and mixing individual vocal harmonies.
-2. **Interactive UI Studio**: A React/Next.js workspace frontend with live wave visualization, memory editing, and manual trace inspection.
-3. **Adaptive Lyric Rewrites**: Allow users to edit lyrics and trigger local vocal synthesis without regenerating the whole instrumental backing.
