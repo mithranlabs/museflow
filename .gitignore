@@ -1,8 +1,53 @@
-node_modules
+# Dependency directories
+node_modules/
+
+# Environment files
 .env
-dist
-artifacts
-logs
-coverage
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.development
+.env.test
+.env.production
+
+# Build and distribution directories
+dist/
+build/
+.tsbuildinfo
+
+# Application dynamic data & media
+artifacts/
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 *.mp3
 *.wav
+*.jpg
+*.jpeg
+*.png
+
+# Testing coverage
+coverage/
+
+# OS-specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE and editors
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+*.swo

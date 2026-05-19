@@ -27,9 +27,15 @@ import { CompositionAgent }      from '../agents/compositionAgent';
 import { ProducerAgent }         from '../agents/producerAgent';
 import { CriticAgent }           from '../agents/criticAgent';
 import { MusicGenerationAgent }  from '../agents/musicGenerationAgent';
+import { VocalStylingAgent }      from '../agents/vocalStylingAgent';
 import { HindsightMemory, RetainPayload } from '../memory/hindsight';
 import { saveArtifact }          from '../artifacts/storage';
 import { logExecution }          from '../utils/logger';
+import { vocalService }          from '../services/vocalService';
+import { imageService }          from '../services/imageService';
+import { mixAudio }              from '../utils/audioMixer';
+import fs                        from 'fs';
+import path                      from 'path';
 
 // ── CascadeAgent bootstrap ────────────────────────────────────────────────────
 // Two model tiers:
@@ -204,6 +210,7 @@ export class CascadeFlowOrchestrator {
   private producerAgent        = new ProducerAgent();
   private criticAgent          = new CriticAgent();
   private musicGenerationAgent = new MusicGenerationAgent();
+  private vocalStylingAgent    = new VocalStylingAgent();
 
   public async runWorkflow(
     request: CreativeRequest,
@@ -267,6 +274,7 @@ export class CascadeFlowOrchestrator {
       let prodRes!:    AgentResponse<any>;
       let musicgenRes!: AgentResponse<any>;
       let criticRes!:  AgentResponse<any>;
+      let mixedAudioUrl = '';
 
       let loopCount = 0;
       const maxRefinementAttempts = 2;
@@ -330,6 +338,20 @@ export class CascadeFlowOrchestrator {
           'Write detailed production notes and arrangement guidance for a recording session',
         );
 
+        // STEP 5.5: Vocal Styling
+        const stylingRes = await routedStep(
+          ctx, this.vocalStylingAgent,
+          `Vocal Styling ${refinementLabel}`.trim(),
+          isRefinement ? 'RETRYING' : 'RUNNING',
+          {
+            direction:          currentRequest.direction,
+            emotion:            emotionRes.output.emotion,
+            composition:        compRes.output,
+            lyrics:             lyricsRes.output.lyrics,
+          },
+          'Design atmospheric, dreamy, and emotional vocal styling and select short high-impact vocal hooks',
+        );
+
         // STEP 6: Music Generation (Loudly)
         musicgenRes = await routedStep(
           ctx, this.musicGenerationAgent,
@@ -344,6 +366,65 @@ export class CascadeFlowOrchestrator {
           'Generate parametric Loudly API payload for music generation',
         );
 
+        // STEP 6.5: Vocal Generation & Mixing
+        const audioDir = path.join(process.cwd(), 'artifacts', 'audio');
+        if (!fs.existsSync(audioDir)) {
+          fs.mkdirSync(audioDir, { recursive: true });
+        }
+
+        ctx.addStep(`Vocal Generation ${refinementLabel}`.trim(), 'VocalService', 'RUNNING', 'vocal-sdk');
+        const vocalStartTime = Date.now();
+        mixedAudioUrl = musicgenRes.output.audioUrl;
+
+        try {
+          const isRapOrFull = 
+            emotionRes.output.genre?.toLowerCase().includes('hip-hop') || 
+            emotionRes.output.genre?.toLowerCase().includes('rap') ||
+            stylingRes.output.vocalDensity?.toLowerCase().includes('full') ||
+            stylingRes.output.vocalDensity?.toLowerCase().includes('lead') ||
+            stylingRes.output.vocalDensity?.toLowerCase().includes('rap') ||
+            compRes.output.vocalStyle?.toLowerCase().includes('rap');
+
+          const vocalFile = await vocalService.generateVocals({
+            lyrics: lyricsRes.output.lyrics,
+            vocalHooks: isRapOrFull ? undefined : stylingRes.output.vocalHooks,
+          }, audioDir);
+
+          ctx.addStep(
+            `Vocal Generation ${refinementLabel}`.trim(), 'VocalService', 'SUCCESS', 'vocal-sdk',
+            { vocalFile }, Date.now() - vocalStartTime, 0
+          );
+
+          ctx.addStep(`Audio Mixing ${refinementLabel}`.trim(), 'AudioMixer', 'RUNNING', 'ffmpeg');
+          const mixStartTime = Date.now();
+          const mixFilename = `mixed_${workflowId}_${loopCount}.mp3`;
+          const mixPath = path.join(audioDir, mixFilename);
+
+          await mixAudio({
+            backingTrackUrlOrPath: musicgenRes.output.audioUrl,
+            vocalTrackPath: vocalFile,
+            outputPath: mixPath,
+            vocalDelaySeconds: 4, // 4-second intro
+            effects: stylingRes.output.effects,
+            mixStyle: stylingRes.output.mixStyle,
+          }, audioDir);
+
+          // Build final mixed URL
+          const port = process.env.PORT || 3001;
+          mixedAudioUrl = `http://localhost:${port}/artifacts/audio/${mixFilename}`;
+
+          ctx.addStep(
+            `Audio Mixing ${refinementLabel}`.trim(), 'AudioMixer', 'SUCCESS', 'ffmpeg',
+            { mixedAudioUrl }, Date.now() - mixStartTime, 0
+          );
+        } catch (mixErr: any) {
+          logExecution('CascadeFlow', 'MIX_ERROR_FALLBACK', { error: mixErr.message });
+          ctx.addStep(
+            `Audio Mixing ${refinementLabel}`.trim(), 'AudioMixer', 'FAILED', 'ffmpeg',
+            { error: mixErr.message }, undefined, 0
+          );
+        }
+
         // STEP 7: Critic Evaluation
         criticRes = await routedStep(
           ctx, this.criticAgent,
@@ -355,7 +436,10 @@ export class CascadeFlowOrchestrator {
             emotion:     emotionRes.output,
             composition: compRes.output,
             production:  prodRes.output,
-            audio:       musicgenRes.output,
+            audio:       {
+              ...musicgenRes.output,
+              audioUrl: mixedAudioUrl,
+            },
           },
           'Critically evaluate song lyrics, composition, and production quality — expert music critic',
         );
@@ -415,6 +499,28 @@ export class CascadeFlowOrchestrator {
         `Vibe: ${emotionRes.output.emotion} ${emotionRes.output.genre}, ` +
         `atmosphere: ${compRes.output.atmosphere}. Digital art style.`;
 
+      // Generate Album Art
+      ctx.addStep('Album Art Generation', 'ImageService', 'RUNNING', 'stability-diffusion / pollinations');
+      const artStartTime = Date.now();
+      let albumArtUrl: string | undefined = undefined;
+
+      try {
+        const imageDir = path.join(process.cwd(), 'artifacts', 'images');
+        const artFilename = await imageService.generateAlbumArt(albumArtPrompt, workflowId, imageDir);
+        const port = process.env.PORT || 3001;
+        albumArtUrl = `http://localhost:${port}/artifacts/images/${artFilename}`;
+        ctx.addStep(
+          'Album Art Generation', 'ImageService', 'SUCCESS', 'stability-diffusion / pollinations',
+          { albumArtUrl }, Date.now() - artStartTime, 0
+        );
+      } catch (artErr: any) {
+        logExecution('CascadeFlow', 'ALBUM_ART_ERROR', { error: artErr.message });
+        ctx.addStep(
+          'Album Art Generation', 'ImageService', 'FAILED', 'stability-diffusion / pollinations',
+          { error: artErr.message }, undefined, 0
+        );
+      }
+
       const loudlyPromptStr =
         `${emotionRes.output.genre}, ${compRes.output.bpm} BPM, ` +
         `${emotionRes.output.emotion} mood, ${compRes.output.atmosphere} atmosphere, ` +
@@ -445,10 +551,11 @@ export class CascadeFlowOrchestrator {
         vocalStyle:        compRes.output.vocalStyle,
         arrangementNotes:  prodRes.output.arrangementNotes,
         albumArtPrompt,
+        albumArtUrl,
         sunoPrompt,
         loudlyPrompt:      loudlyPromptStr,
         musicgenPrompt:    musicgenRes.output.musicgenPrompt,
-        generatedAudioUrl: musicgenRes.output.audioUrl,
+        generatedAudioUrl: mixedAudioUrl || musicgenRes.output.audioUrl,
         allVariations:     musicgenRes.output.allVariations,
         sessionSummary,
       };

@@ -42,6 +42,15 @@ export interface CompositionOutput {
   atmosphere: string;
 }
 
+export interface VocalStylingOutput {
+  voiceType: string;
+  delivery: string;
+  effects: string[];
+  mixStyle: string;
+  vocalDensity: string;
+  vocalHooks: string[];
+}
+
 // ── Final creative package (returned by orchestrator) ─────────────────────────
 
 export interface FinalCreativePackage {
@@ -55,6 +64,7 @@ export interface FinalCreativePackage {
   vocalStyle:       string;
   arrangementNotes: string;
   albumArtPrompt:   string;
+  albumArtUrl?:     string;
   sunoPrompt:       string;
   loudlyPrompt:     string;   // replaces musicgenPrompt
   musicgenPrompt:   string;   // kept for backward-compat

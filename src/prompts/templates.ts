@@ -136,3 +136,29 @@ Respond ONLY with a JSON object in this format:
 }
 `;
 
+export const VOCAL_STYLING_PROMPT_TEMPLATE = (direction: string, emotion: string, composition: any, lyrics: string) => `
+You are the Vocal Styling Agent for MuseFlow.
+Your task is to design atmospheric, dreamy, and emotional vocal styling and select short, high-impact vocal hooks/fragments to vocalize.
+
+DO NOT generate full singing or spoken text of the entire song. Instead, extract 1-3 short, emotionally resonant phrases (hooks) from the chorus or emotional sections of the lyrics (e.g. "lost in the rain tonight...", "echoes of your voice...").
+
+Inputs:
+- Creative Direction: "${direction}"
+- Emotion Context: ${emotion}
+- Composition: ${JSON.stringify(composition)}
+- Lyrics: "${lyrics.substring(0, 1000)}"
+
+Select an appropriate atmospheric voice type, delivery style, spatial and modulation effects, mix style (e.g., distant ambient, blended background), vocal density (minimal/atmospheric), and a list of 1-3 specific short phrase fragments ("vocalHooks") to be processed.
+
+Respond ONLY with a JSON object in this format:
+{
+  "voiceType": "soft female | whispery male | ethereal texture | distant narrator",
+  "delivery": "whispery melancholic | dreamy nostalgic | spoken-word ambient | slow ethereal",
+  "effects": ["large reverb", "stereo delay", "soft chorus", "high-pass filter", "tape saturation"],
+  "mixStyle": "distant ambient | blended background | lo-fi megaphone",
+  "vocalDensity": "minimal | sparse hooks | atmospheric pads",
+  "vocalHooks": ["phrase one", "phrase two"]
+}
+`;
+
+
