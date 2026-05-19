@@ -61,6 +61,88 @@ app.post('/api/orchestrate', async (req, res) => {
   }
 });
 
+// Helper function to save songs to user_songs.json
+function saveSongToLibrary(song: any) {
+  const songsFile = path.join(process.cwd(), 'artifacts', 'user_songs.json');
+  let songs: any[] = [];
+  if (fs.existsSync(songsFile)) {
+    try {
+      songs = JSON.parse(fs.readFileSync(songsFile, 'utf-8'));
+    } catch (err) {}
+  }
+  songs.push(song);
+  fs.mkdirSync(path.dirname(songsFile), { recursive: true });
+  fs.writeFileSync(songsFile, JSON.stringify(songs, null, 2));
+}
+
+// Streaming orchestration endpoint
+app.post('/api/orchestrate/stream', async (req, res) => {
+  const { direction, prompt, emotion, mood, story, genre, userId = 'default-user' } = req.body;
+  const promptText = direction || prompt;
+
+  if (!promptText) {
+    return res.status(400).json({ error: 'Creative direction prompt is required.' });
+  }
+
+  // Set SSE Headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+
+  const sendEvent = (event: any) => {
+    res.write(`data: ${JSON.stringify(event)}\n\n`);
+  };
+
+  try {
+    sendEvent({ type: 'start', message: 'Starting CascadeFlow multi-agent creative orchestration...' });
+
+    const result = await orchestrator.runWorkflow(
+      {
+        direction: promptText,
+        emotion: emotion || mood || 'melancholic',
+        vibe: mood || 'nostalgic',
+        story,
+        genre
+      },
+      userId,
+      (event) => {
+        sendEvent(event);
+      }
+    );
+
+    const frontendData = {
+      id: `song-${Date.now()}`,
+      songTitle: result.package.title,
+      title: result.package.title,
+      lyrics: result.package.lyrics,
+      coverArtUrl: result.package.albumArtUrl,
+      productionStyle: result.package.productionNotes || result.package.arrangementNotes || 'Ambient Synthwave',
+      vocalsUrl: result.package.generatedAudioUrl,
+      compositionUrl: result.package.allVariations?.[0]?.audioUrl || result.package.generatedAudioUrl,
+      createdAt: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+    };
+
+    saveSongToLibrary(frontendData);
+
+    sendEvent({
+      type: 'complete',
+      data: frontendData,
+      trace: result.trace
+    });
+
+    res.end();
+  } catch (error: any) {
+    console.error('[Streaming Orchestration Error]:', error);
+    sendEvent({
+      type: 'error',
+      error: 'Orchestration workflow failed.',
+      details: error.message
+    });
+    res.end();
+  }
+});
+
 // ── 1b. Frontend-compatible orchestration ──────────────────────────────────────
 
 app.post('/api/muse/generate', async (req, res) => {

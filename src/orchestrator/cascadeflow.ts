@@ -73,7 +73,7 @@ const metrics = new MetricsCollector();
 
 // ── Execution context factory ──────────────────────────────────────────────────
 
-function createExecutionContext(workflowId: string, userId: string): ExecutionContext {
+function createExecutionContext(workflowId: string, userId: string, onEvent?: (event: any) => void): ExecutionContext {
   const startTime = Date.now();
   const trace: OrchestrationTrace = {
     workflowId,
@@ -97,7 +97,7 @@ function createExecutionContext(workflowId: string, userId: string): ExecutionCo
       stepName, agentName, state, model,
       output?, latency?, retries?, escalation?,
     ) {
-      trace.steps.push({
+      const stepObj = {
         step:      stepName,
         agent:     agentName,
         state,
@@ -107,8 +107,16 @@ function createExecutionContext(workflowId: string, userId: string): ExecutionCo
         timestamp: new Date().toISOString(),
         output,
         escalation,
-      });
+      };
+      trace.steps.push(stepObj);
       persist();
+
+      if (onEvent) {
+        onEvent({
+          type: 'step',
+          step: stepObj
+        });
+      }
 
       logExecution('CascadeFlow', state, {
         step:    stepName,
@@ -125,6 +133,15 @@ function createExecutionContext(workflowId: string, userId: string): ExecutionCo
       trace.endTime     = new Date().toISOString();
       trace.totalLatency = Date.now() - startTime;
       persist();
+
+      if (onEvent) {
+        onEvent({
+          type: 'fail',
+          error: error.message,
+          totalLatency: trace.totalLatency
+        });
+      }
+
       logExecution('CascadeFlow', 'FAILED', { error: error.message });
     },
 
@@ -133,6 +150,15 @@ function createExecutionContext(workflowId: string, userId: string): ExecutionCo
       trace.endTime     = new Date().toISOString();
       trace.totalLatency = Date.now() - startTime;
       persist();
+
+      if (onEvent) {
+        onEvent({
+          type: 'succeed',
+          totalLatency: trace.totalLatency,
+          retriesCount: trace.retriesCount
+        });
+      }
+
       logExecution('CascadeFlow', 'SUCCESS', {
         totalLatency: `${trace.totalLatency}ms`,
         retries:      trace.retriesCount,
@@ -215,10 +241,11 @@ export class CascadeFlowOrchestrator {
   public async runWorkflow(
     request: CreativeRequest,
     userId:  string,
+    onEvent?: (event: any) => void
   ): Promise<{ package: FinalCreativePackage; trace: OrchestrationTrace }> {
 
     const workflowId = `wf-${Date.now()}`;
-    const ctx        = createExecutionContext(workflowId, userId);
+    const ctx        = createExecutionContext(workflowId, userId, onEvent);
     const memory     = new HindsightMemory(userId);
 
     try {
