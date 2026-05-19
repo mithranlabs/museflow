@@ -1,0 +1,868 @@
+openapi: 3.0.1
+info:
+    title: Loudly Music API
+    version: 1.0.0
+    description: |
+        The Loudly Music API provides functionalities for:
+        - **Account**: Operations related to account and limits monitoring.
+        - **Catalog**: Fetching and filtering songs from the Loudly music catalog.
+        - **AI Loudly**: Generating AI-based music using various parameters (genres, structures, instruments) or a text prompt.
+
+        ### CORS Configuration
+        If you are accessing this API from a browser or a frontend application, ensure that CORS is properly configured on the server side. For local development, you may need appropriate headers such as:
+        ```http
+        Access-Control-Allow-Origin: *
+        Access-Control-Allow-Methods: GET, POST, OPTIONS
+        Access-Control-Allow-Headers: API-KEY, Content-Type, Accept, Authorization
+        ```
+
+        These headers are typically set by the server. Please ensure your server supports CORS if needed.
+
+security:
+    - apikey: []
+
+externalDocs:
+    description: Loudly API Documentation
+    url: 'https://docs.google.com/document/d/1tdcAeL5qMCOYFip6ftKFGCu1BRXwVLEVQLaUHqCX40I'
+
+servers:
+    - url: https://soundtracks.loudly.com/
+
+tags:
+    - name: Account
+    - name: AI Music Generator
+    - name: AI Loudly
+    - name: Catalog
+    - name: Remixer
+    - name: Stems
+paths:
+    /api/account/limits:
+        get:
+            tags:
+                - Account
+            security:
+                - apikey: []
+            description: Returns usage limits, current consumption, and remaining quota, with optional filtering by a specified date range.
+            parameters:
+                - name: date_from
+                  description: Start date for filtering usage.
+                  in: query
+                  required: false
+                  schema:
+                      type: string
+                - name: date_to
+                  description: End date for filtering usage.
+                  in: query
+                  required: false
+                  schema:
+                      type: string
+            responses:
+                '200':
+                    description: A list of usage limits
+                    content:
+                        application/json:
+                            schema:
+                                type: array
+                                items:
+                                    $ref: '#/components/schemas/account_limit'
+                            example:
+                                - $ref: '#/components/examples/vega_song_with_prompt_limit'
+                                - $ref: '#/components/examples/get_songs_limit'
+                                - $ref: '#/components/examples/vega_song_limit'
+
+
+    /api/songs/tags:
+        get:
+            tags:
+                - Catalog
+            security:
+                - apikey: []
+            description: Returns available tags (mood, genre, key) that can be used to filter the catalog songs.
+            responses:
+                '200':
+                    description: Available tags for search
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/tags'
+                '404':
+                    description: No tags found
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/error'
+                            examples:
+                                error:
+                                    value:
+                                        error: "Tag not found"
+                                        error_description: "song tag not found"
+    /api/songs:
+        get:
+            tags:
+                - Catalog
+            security:
+                - apikey: []
+            parameters:
+                - name: mood
+                  description: Filter songs by mood tag.
+                  in: query
+                  schema:
+                      type: string
+                - name: genre
+                  description: Filter songs by genre tag.
+                  in: query
+                  schema:
+                      type: string
+                - name: key
+                  description: Filter songs by musical key.
+                  in: query
+                  schema:
+                      type: string
+                - name: page
+                  description: Page number for pagination.
+                  in: query
+                  schema:
+                      type: integer
+                      example: 2
+                - name: limit
+                  description: Number of results to return per page.
+                  in: query
+                  schema:
+                      type: integer
+                      example: 10
+            description: Retrieves songs from the catalog, optionally filtered by mood, genre, key, and paginated.
+            responses:
+                '200':
+                    description: New response
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    items:
+                                        type: array
+                                        description: A list of songs with detailed information.
+                                        items:
+                                            $ref: '#/components/schemas/song'
+                                    pagination_data:
+                                        type: object
+                                        properties:
+                                            current_page:
+                                                type: integer
+                                            last_page:
+                                                type: integer
+                                            items_per_page:
+                                                type: integer
+                                            items_count:
+                                                type: integer
+                                            total_pages:
+                                                type: integer
+                                            total_items:
+                                                type: integer
+
+    /api/ai/genres:
+        get:
+            tags:
+                - "AI Music Generator"
+            security:
+                - apikey: []
+            description: Returns a list of available genres for AI song generation. This endpoint helps you choose values for `POST /api/ai/songs`.
+            responses:
+                '200':
+                    description: An array of genre objects
+                    content:
+                        application/json:
+                            schema:
+                                type: array
+                                items:
+                                    $ref: '#/components/schemas/genre'
+
+    /api/ai/structures:
+        get:
+            tags:
+                - "AI Music Generator"
+            security:
+                - apikey: []
+            description: Returns a list of available song structures that can be used when generating AI music with `POST /api/ai/songs`.
+            responses:
+                '200':
+                    description: array of structures
+                    content:
+                        application/json:
+                            schema:
+                                type: array
+                                items:
+                                    $ref: '#/components/schemas/structure'
+
+    /api/ai/songs:
+        post:
+            tags:
+                - "AI Music Generator"
+            security:
+                - apikey: []
+            description: Generates an AI song based on provided parameters.
+            requestBody:
+                content:
+                    multipart/form-data:
+                        schema:
+                            type: object
+                            required:
+                                - genre
+                            properties:
+                                genre:
+                                    type: string
+                                    description: The main genre or subgenre. Use `GET /api/ai/genres` to see available genres and micro-genres.
+                                    example: "House"
+                                genre_blend:
+                                    type: string
+                                    description: A secondary genre to blend with the main genre.  Use `GET /api/ai/genres` to see available genres
+                                duration:
+                                    type: integer
+                                    description: Desired song duration in seconds.
+                                    minimum: 30
+                                    maximum: 420
+                                energy:
+                                    type: string
+                                    description: Desired energy.
+                                    enum: ['low', 'high', 'original']
+                                bpm:
+                                    type: integer
+                                    description: Tempo in BPM. For optimal results, choose a value in the recommended range from `GET /api/ai/genres`.
+                                key_root:
+                                    type: string
+                                    description: The main note of the key
+                                    enum: ['C', 'C#/Db', 'D', 'D#/Eb', 'E', 'F', 'F#/Gb', 'G', 'G#/Ab', 'A', 'A#/Bb', 'B']
+                                key_quality:
+                                    type: string
+                                    description: Key type.
+                                    enum: ['major', 'minor']
+                                instruments:
+                                    type: array
+                                    items:
+                                        type: string
+                                    description: "A comma-separated list of instruments to include. Available instruments depend on the selected genre and are found in `GET /api/ai/genres`. They can be repeated for multiple instances (e.g., `GUITAR`,`GUITAR`,`DRUMS`)."
+                                structure_id:
+                                    type: integer
+                                    description: "Desired song structure. Use `GET /api/ai/structures` to see available structures."
+                                model:
+                                    type: string
+                                    description: "The AI model version to use for song generation."
+                                    enum: [ 'VEGA_1', 'VEGA_2' ]
+                                test:
+                                    type: boolean
+                                    description: "When set to `true`, the endpoint returns a dummy song for testing purposes without consuming any credits. Useful for testing."
+                                    default: false
+            responses:
+                '200':
+                    description: Returns a song object with details about the generated track
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ai_song'
+                '400':
+                    description: Bad Request
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/error'
+                            examples:
+                                error:
+                                    value:
+                                        error: "Genre '%s' doesn't exist"
+                                        error_description: "Genre '%s' doesn't exist"
+                '500':
+                    description: Internal Server Error
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/error'
+                            examples:
+                                error:
+                                    value:
+                                        error: "External service calling limit exceeded: (service: %s, Timer seconds remaining: %d, Attempts remaining: %d)"
+                                        error_description: "External service calling limit exceeded: (service: %s, Timer seconds remaining: %d, Attempts remaining: %d)"
+
+    /api/ai/prompt/songs:
+        post:
+            tags:
+                - "AI Music Generator"
+            security:
+                - apikey: []
+            description: Generates an AI song based on a text prompt
+            requestBody:
+                content:
+                    multipart/form-data:
+                        schema:
+                            type: object
+                            required:
+                                - prompt
+                            properties:
+                                prompt:
+                                    type: string
+                                    description: A text description of the desired song.
+                                    example: "A 90-second energetic house track with tropical vibes and a melodic flute line"
+                                duration:
+                                    type: integer
+                                    description: Desired song duration in seconds.
+                                    minimum: 30
+                                    maximum: 420
+                                test:
+                                    type: boolean
+                                    description: When set to true, the endpoint returns a dummy song for testing purposes without consuming any credits. Useful for testing.
+                                structure_id:
+                                    type: integer
+                                    description: "Desired song structure. Use `GET /api/ai/structures` to see available structures."
+                                model:
+                                    type: string
+                                    description: "The AI model version to use for song generation."
+                                    enum: [ 'VEGA_1', 'VEGA_2' ]
+            responses:
+                '200':
+                    description: Returns a song object (same structure as parameter-based generation).
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ai_song'
+                '500':
+                    description: Internal Server Error
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/error'
+                            examples:
+                                error:
+                                    value:
+                                        error: "External service calling limit exceeded: (service: %s, Timer seconds remaining: %d, Attempts remaining: %d)"
+                                        error_description: "External service calling limit exceeded: (service: %s, Timer seconds remaining: %d, Attempts remaining: %d)"
+
+    /api/ai/prompt/random:
+        get:
+            tags:
+                - "AI Music Generator"
+            security:
+                - apikey: []
+            description: Returns a random text prompt to inspire text-to-music generation using `POST /api/ai/prompt/songs`.
+            responses:
+                '200':
+                    description: Text prompt
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    prompt:
+                                        type: string
+                                        description: A text prompt to inspire text-to-music generation.
+                                example:
+                                    prompt: "An energetic track with a jazzy undertone."
+
+    /api/ai/songs/{id}/stems:
+        post:
+            tags:
+                - Stems
+            security:
+                - apikey: []
+            description: Generates separated audio stems (individual instrument tracks) from an AI-generated song. This endpoint processes the song and returns a ZIP file containing isolated tracks for each instrument.
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  description: The unique identifier (UUID) of the AI-generated song.
+                  schema:
+                      type: string
+                      format: uuid
+            responses:
+                '200':
+                    description: Returns a URL to download the ZIP file containing all separated stems.
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    url:
+                                        type: string
+                                        description: URL to download the ZIP file containing all separated stems.
+                '404':
+                    description: Song not found
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/error'
+                            examples:
+                                error:
+                                    value:
+                                        error: "Invalid song ID"
+                                        error_description: "The provided song ID is not valid or does not exist"
+
+    /api/ai/vega/remix/bundles:
+        post:
+            tags:
+                - Remixer
+            security:
+                - apikey: []
+            description: Creates a new remix bundle from an uploaded audio file. The remixer analyzes the source track and generates a bundle of remixes based on the selected genre and target BPM.
+            requestBody:
+                content:
+                    multipart/form-data:
+                        schema:
+                            type: object
+                            required:
+                                - music_file
+                                - genre
+                            properties:
+                                music_file:
+                                    type: string
+                                    format: binary
+                                    description: The source audio file to remix. Upload a supported music file that will be used as the input for remix generation.
+                                genre:
+                                    type: string
+                                    description: The target genre or style for the remix. This determines the musical direction of the generated remix bundle. Use `GET /api/ai/genres` to see which genres are available.
+                                    example: "House"
+                                bpm:
+                                    type: integer
+                                    description: The target tempo in beats per minute for the remix output.
+                                    example: 124
+            responses:
+                '200':
+                    description: Returns the created remix bundle with its metadata and generated remix packs.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/remix_bundle'
+                '400':
+                    description: Bad Request
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/error'
+                            examples:
+                                error:
+                                    value:
+                                        error: "Invalid remix request"
+                                        error_description: "The uploaded file or provided parameters are not valid"
+                '500':
+                    description: Internal Server Error
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/error'
+                            examples:
+                                error:
+                                    value:
+                                        error: "Remix generation failed"
+                                        error_description: "An unexpected error occurred while creating the remix bundle"
+
+
+components:
+    schemas:
+        error:
+            type: object
+            required:
+                - error
+                - error_description
+            properties:
+                error:
+                    type: string
+                error_description:
+                    type: string
+                payload:
+                    type: object
+                    nullable: true
+        ai_song:
+            type: object
+            required:
+                - id
+                - title
+                - duration
+                - music_file_path
+                - wave_form_file_path
+                - created_at
+            properties:
+                id:
+                    type: string
+                    format: uuid
+                    description: A unique identifier for the song.
+                title:
+                    type: string
+                    description: The title of the track.
+                duration:
+                    type: integer
+                    description: Length of the song ***in milliseconds***.
+                music_file_path:
+                    type: string
+                    format: uri
+                    description: URL to the audio file of the song.
+                wave_form_file_path:
+                    type: string
+                    format: uri
+                    description: URL to the waveform data file (typically used for visualizations).
+                created_at:
+                    type: string
+                    format: date-time
+                    description: Timestamp indicating when the track was created (in ISO 8601 format).
+                bpm:
+                    type: integer
+                    description: The tempo of the track in beats per minute.
+                key:
+                    type: object
+                    description: Musical key information for the track.
+                    properties:
+                        id:
+                            type: integer
+                            description: Unique identifier for the key.
+                        name:
+                            type: string
+                            description: Name of the key.
+                            example: C major
+                        active:
+                            type: boolean
+                            description: Indicates if the key is currently active or in use.
+                model:
+                    type: string
+                    description: The AI model version used for song generation.
+                    enum: [ 'VEGA_1', 'VEGA_2' ]
+            example:
+                id: "12341234-1234-1234-1234-123412341234"
+                title: "My AI Generated Track"
+                duration: 33000
+                music_file_path: "https://example.com/path/to/music.mp3"
+                wave_form_file_path: "https://example.com/path/to/waveform.json"
+                created_at: "2025-03-27T17:09:55+0100"
+                bpm: 115
+                key:
+                    id: 17
+                    name: "D Minor"
+                    active: true
+                model: "VEGA_2"
+        song:
+            type: object
+            properties:
+                id:
+                    type: string
+                    format: uuid
+                    description: Unique identifier for the song.
+                title:
+                    type: string
+                    description: Title of the song.
+                duration:
+                    type: integer
+                    description: Duration in milliseconds.
+                music_file_path:
+                    type: string
+                    format: uri
+                    description: URL to the audio file.
+                genres:
+                    type: array
+                    description: Primary genre tags.
+                    items:
+                        $ref: '#/components/schemas/song_tag'
+                secondary_genres:
+                    type: array
+                    description: Additional genre tags.
+                    items:
+                        $ref: '#/components/schemas/song_tag'
+                moods:
+                    type: array
+                    description: Mood tags.
+                    items:
+                        $ref: '#/components/schemas/song_tag'
+                instruments:
+                    type: array
+                    description: Instrument tags.
+                    items:
+                        $ref: '#/components/schemas/song_tag'
+                keys:
+                    type: array
+                    description: Musical key(s).
+                    items:
+                        $ref: '#/components/schemas/song_tag'
+                energies:
+                    type: array
+                    description: Energy level tags.
+                    items:
+                        $ref: '#/components/schemas/song_tag'
+                eras:
+                    type: array
+                    description: Era or decade tags.
+                    items:
+                        $ref: '#/components/schemas/song_tag'
+                has_vocal:
+                    type: boolean
+                    description: Indicates if the track has vocals.
+                tempo_bpm:
+                    type: integer
+                    description: Tempo in beats per minute.
+        user:
+            required:
+                - id
+                - email
+                - first_name
+                - last_name
+                - profile_image_path
+            type: object
+            properties:
+                id:
+                    type: string
+                email:
+                    type: string
+                first_name:
+                    type: string
+                last_name:
+                    type: string
+                profile_image_path:
+                    type: string
+        song_tag:
+            type: object
+            properties:
+                id:
+                    type: integer
+                name:
+                    type: string
+                active:
+                    type: boolean
+        account_limit:
+            type: object
+            properties:
+                limits:
+                    type: array
+                    items:
+                        type: object
+                        properties:
+                            request_type:
+                                type: string
+                                description: Specifies which type of request the usage limits apply to.
+                                enum: ['GENERATE_VEGA_SONG_WITH_PROMPT', 'GET_SONGS', 'GENERATE_VEGA_SONG']
+                            limit:
+                                type: integer
+                                description: The total number of requests allowed per month for the given request type.
+                            used:
+                                type: integer
+                                description: The number of requests that have been used within the specified timeframe.
+                            left:
+                                type: integer
+                                description: The number of requests still available within the specified timeframe.
+                            date_from:
+                                type: string
+                                description: Start date of the date range used to filter the usage data.
+                            date_to:
+                                type: string
+                                description: End date of the date range used to filter the usage data.
+                top_up:
+                    type: object
+                    properties:
+                        total:
+                            type: integer
+                        used:
+                            type: integer
+                        available:
+                            type: integer
+
+            example:
+                $ref: '#/components/examples/vega_song_with_prompt_limit'
+        genre:
+            type: object
+            properties:
+                id:
+                    type: integer
+                    description: Identifier for the genre.
+                name:
+                    type: string
+                    description: Name of the genre.
+                    example: Ambient
+                description:
+                    type: string
+                    description: An overview of the genre’s sound, mood, and musical characteristics.
+                image_url:
+                    type: string
+                    format: uri
+                    description: URL pointing to an image that visually represents the genre.
+                instruments:
+                    type: array
+                    description: The list of instruments available for this genre.
+                    items:
+                        type: string
+                bpm:
+                    type: object
+                    properties:
+                        low:
+                            type: integer
+                            description: The lower end of the available tempo range for this genre (in beats per minute).
+                        high:
+                            type: integer
+                            description: The higher end of the available tempo range for this genre (in beats per minute).
+                suggested_instruments:
+                    type: array
+                    description: A curated list of instruments recommended for use in this genre.
+                    items:
+                        type: string
+                micro_genres:
+                    type: array
+                    description: "Array of sub-genres or stylistic variations within the main genre. Each micro-genre has the same structure as a genre and can be used interchangeably when generating a song. The hierarchy is purely for visualization purposes and does not affect functionality."
+                    items:
+                        type: object
+        structure:
+            type: object
+            properties:
+                id:
+                    type: integer
+                    description: identifier for the structure.
+                name:
+                    type: string
+                    description: Name of the structure.
+                    example: Classic
+                description:
+                    type: string
+                    description: A short explanation or summary of the structure’s characteristics or purpose.
+                image_url:
+                    type: string
+                    format: uri
+                    description: URL to an image that visually represents the structure.
+        tags:
+            type: object
+            description: Available tags that can be used to filter catalog songs.
+            properties:
+                mood:
+                    type: array
+                    description: Available mood tags.
+                    items:
+                        type: string
+                genre:
+                    type: array
+                    description: Available genre tags.
+                    items:
+                        type: string
+                key:
+                    type: array
+                    description: Available musical key tags.
+                    items:
+                        type: string
+            example:
+                mood: ["Dreamy", "Laid Back", "Dark"]
+                genre: ["Funk", "Beats", "Indian"]
+                key: ["E Major", "Ab/G# Major"]
+
+        remix_bundle:
+            type: object
+            description: A remix bundle represents a remix generation request and contains the generated remix packs, configuration used for generation, and processing state.
+            properties:
+                id:
+                    type: string
+                    description: Unique identifier for the remix bundle.
+                created_at:
+                    type: string
+                    description: Timestamp indicating when the remix bundle was created.
+                is_collapsed:
+                    type: boolean
+                    description: Indicates whether the remix bundle is collapsed in the client UI.
+                is_finished:
+                    type: boolean
+                    description: Indicates whether all remix generation jobs in the bundle have finished processing.
+                capacity:
+                    type: integer
+                    description: The total number of remix packs that can be generated or returned in this bundle.
+                title:
+                    type: string
+                    description: Title of the remix bundle, usually derived from the uploaded source track.
+                remix_packs:
+                    type: array
+                    description: List of remix packs generated as part of this bundle.
+                    items:
+                        $ref: '#/components/schemas/remix_pack'
+                formula:
+                    type: object
+                    description: The remix settings used to generate the bundle.
+                    properties:
+                        genre:
+                            type: string
+                            description: The selected target genre for the remix. Use `GET /api/ai/genres` to see which genres are available.
+                        micro_genre:
+                            type: string
+                            description: A more specific stylistic variation within the selected genre, when applicable.
+                        bpm:
+                            type: integer
+                            description: The target tempo in beats per minute used for remix generation.
+                error:
+                    type: string
+                    description: Error message returned if remix generation failed or completed with issues.
+                use_cache:
+                    type: boolean
+                    description: Indicates whether cached remix results were used instead of generating a new bundle from scratch.
+
+        remix_pack:
+            type: object
+            description: A remix pack is a generated remix output within a remix bundle. It contains the preview track, export file, processing state, and related metadata.
+            properties:
+                id:
+                    type: string
+                    description: Unique identifier for the remix pack.
+                created_at:
+                    type: string
+                    description: Timestamp indicating when the remix pack was created.
+                zip_file_path:
+                    type: string
+                    description: URL to the ZIP file containing the remix pack assets, when available.
+                status:
+                    type: string
+                    description: Current processing status of the remix pack.
+                preview_song:
+                    type: object
+                    description: The preview track generated for this remix pack.
+                    properties:
+                        id:
+                            type: string
+                            description: Unique identifier for the preview song.
+                        title:
+                            type: string
+                            description: Title of the preview song.
+                        duration:
+                            type: integer
+                            description: Length of the preview song in milliseconds.
+                        music_file_path:
+                            type: string
+                            description: URL to the preview audio file.
+                        wav_file_path:
+                            type: string
+                            description: URL to the WAV version of the preview audio file.
+                        created_at:
+                            type: string
+                            description: Timestamp indicating when the preview song was created.
+                        is_in_library:
+                            type: boolean
+                            description: Indicates whether the preview song has been saved to the user's library.
+                        is_preview:
+                            type: boolean
+                            description: Indicates whether this song is a preview version.
+                is_finished:
+                    type: boolean
+                    description: Indicates whether processing for this remix pack has finished.
+                remix_bundle_id:
+                    type: string
+                    description: Identifier of the remix bundle this remix pack belongs to.
+    examples:
+        vega_song_with_prompt_limit:
+            request_type: GENERATE_VEGA_SONG_WITH_PROMPT
+            limit: 15
+            used: 0
+            left: 15
+            date_from: 2025-02-25
+            date_to: 2025-03-27
+        get_songs_limit:
+            request_type: GET_SONGS
+            limit: 15
+            used: 0
+            left: 15
+            date_from: 2025-02-25
+            date_to: 2025-03-27
+        vega_song_limit:
+            request_type: GENERATE_VEGA_SONG
+            limit: 15
+            used: 0
+            left: 15
+            date_from: 2025-02-25
+            date_to: 2025-03-27
+
+    securitySchemes:
+        apikey:
+            type: apiKey
+            name: API-KEY
+            in: header

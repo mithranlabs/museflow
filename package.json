@@ -13,6 +13,8 @@
   "license": "ISC",
   "type": "module",
   "dependencies": {
+    "@cascadeflow/core": "^1.1.0",
+    "@vectorize-io/hindsight-client": "^0.6.2",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",

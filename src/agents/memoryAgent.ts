@@ -33,17 +33,12 @@ export class MemoryAgent extends BaseAgent<MemoryAgentInput, MemoryAgentOutput> 
     try {
       const output = JSON.parse(rawResult) as MemoryAgentOutput;
       
-      // Reflect and update memory with new themes/imagery discovered
+      // Evolve memory with new themes/imagery discovered this session
       if (output.recalledPreferences.imageryToInclude.length > 0) {
-        const uniqueImagery = Array.from(new Set([
-          ...(historicalPrefs.favoriteImagery || []),
-          ...output.recalledPreferences.imageryToInclude
-        ]));
-        
         memorySystem.updateMemory({
-          favoriteImagery: uniqueImagery,
-          preferredGenres: Array.from(new Set([...(historicalPrefs.preferredGenres || []), input.request.genre || 'synthwave'])),
-          vocalPreferences: Array.from(new Set([...(historicalPrefs.vocalPreferences || []), output.recalledPreferences.vocalTone]))
+          likedThemes:      Array.from(new Set([...(historicalPrefs.likedThemes || []), ...output.recalledPreferences.imageryToInclude])),
+          preferredGenres:  Array.from(new Set([...(historicalPrefs.preferredGenres || []), input.request.genre || 'synthwave'])),
+          vocalPreferences: Array.from(new Set([...(historicalPrefs.vocalPreferences || []), output.recalledPreferences.vocalTone])),
         });
       }
 
@@ -52,10 +47,10 @@ export class MemoryAgent extends BaseAgent<MemoryAgentInput, MemoryAgentOutput> 
       console.warn('[MemoryAgent] Failed to parse JSON memory, raw content:', rawResult);
       return {
         recalledPreferences: {
-          genrePreference: `Matches ${input.request.genre || 'synthwave'}`,
-          imageryToInclude: historicalPrefs.favoriteImagery || ['rainy nights', 'neon streets', 'retro memories'],
-          vocalTone: 'Smooth low vocals',
-          avoidStyles: historicalPrefs.dislikedStyles || ['harsh metal screams']
+          genrePreference:  `Matches ${input.request.genre || 'synthwave'}`,
+          imageryToInclude: historicalPrefs.likedThemes ?? ['rainy nights', 'neon streets', 'retro memories'],
+          vocalTone:        'Smooth low vocals',
+          avoidStyles:      historicalPrefs.dislikedStyles ?? ['harsh metal screams'],
         },
         emotionalThemesTracked: 'Nostalgia and loss'
       };

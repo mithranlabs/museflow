@@ -1,36 +1,51 @@
+/**
+ * MuseFlow — MusicGenerationAgent (Loudly Edition)
+ *
+ * Replaces the Replicate/MusicGen backend with LoudlyService.
+ * 
+ * Flow:
+ *   Emotion + Composition + Producer contexts
+ *   → LLM-engineered LoudlyCompositionInput (structured JSON)
+ *   → LoudlyService.generateMusic()
+ *   → MusicGenerationOutput with audioUrl + full metadata
+ */
+
 import { BaseAgent } from './baseAgent';
 import { CreativeRequest } from '../types';
-import { MUSICGEN_PROMPT_TEMPLATE } from '../prompts/templates';
-import Replicate from 'replicate';
-import dotenv from 'dotenv';
+import { loudlyService, LoudlyCompositionInput, LoudlyResult } from '../services/loudly';
 import { logExecution } from '../utils/logger';
 
-dotenv.config();
-
-// Initialize Replicate client if token is present
-const replicateToken = process.env.REPLICATE_API_TOKEN;
-const replicateClient = replicateToken ? new Replicate({ auth: replicateToken }) : null;
+// ── I/O types ─────────────────────────────────────────────────────────────────
 
 export interface MusicGenerationInput {
-  request: CreativeRequest;
-  emotionContext: any;
+  request:           CreativeRequest;
+  emotionContext:    any;
   compositionContext: any;
-  producerContext: any;
+  producerContext:   any;
 }
 
 export interface MusicGenerationOutput {
-  musicgenPrompt: string;
-  audioUrl: string;
+  loudlyPrompt:     LoudlyCompositionInput;
+  audioUrl:         string;
+  allVariations:    Array<{ trackId: string; audioUrl: string }>;
   generationMetadata: {
-    duration: number;
-    modelVersion: string;
-    outputFormat: string;
-    predictionId?: string;
-    pollingAttempts?: number;
-    status: string;
-    apiUsed: 'REPLICATE_REAL' | 'MUSEFLOW_SIMULATED';
+    jobId:        string;
+    pollingMs:    number;
+    attempts:     number;
+    apiUsed:      'LOUDLY_REAL' | 'MUSEFLOW_SIMULATED';
+    genre:        string;
+    bpm:          number;
+    mood:         string;
+    atmosphere:   string;
+    vocalStyle:   string;
+    instruments:  string[];
+    status:       'succeeded';
   };
+  // Kept for backward-compat with FinalCreativePackage
+  musicgenPrompt:   string;
 }
+
+// ── Agent ─────────────────────────────────────────────────────────────────────
 
 export class MusicGenerationAgent extends BaseAgent<MusicGenerationInput, MusicGenerationOutput> {
   constructor() {
@@ -38,151 +53,159 @@ export class MusicGenerationAgent extends BaseAgent<MusicGenerationInput, MusicG
   }
 
   protected async process(input: MusicGenerationInput): Promise<MusicGenerationOutput> {
-    // 1. Run LLM prompt engineering pass to translate composition inputs into optimized MusicGen prompt
-    const promptEngineeringPrompt = MUSICGEN_PROMPT_TEMPLATE(
-      input.request.direction,
-      input.emotionContext,
-      input.compositionContext,
-      input.producerContext
-    );
-    
-    logExecution(this.name, 'ENGINEERING_PROMPT', { model: this.model });
-    const rawResult = await this.callLLM(promptEngineeringPrompt, 'json');
-    let musicgenPrompt = '';
-    
+    // 1. Engineer a structured Loudly composition prompt via LLM
+    const llmPrompt = this.buildPromptEngineeringRequest(input);
+    logExecution(this.name, 'ENGINEERING_LOUDLY_PROMPT', { model: this.model });
+
+    let loudlyInput: LoudlyCompositionInput;
     try {
-      const parsed = JSON.parse(rawResult);
-      musicgenPrompt = parsed.prompt || parsed.musicgenPrompt || '';
+      const rawLLM = await this.callLLM(llmPrompt, 'json');
+      loudlyInput = this.parseLoudlyInput(rawLLM, input);
     } catch (e) {
-      console.warn('[MusicGenerationAgent] Failed to parse MusicGen prompt JSON, raw content:', rawResult);
-      // Fallback manual prompt engineering
-      musicgenPrompt = `A ${input.compositionContext.atmosphere} ${input.emotionContext.genre} track at ${input.compositionContext.bpm} BPM, key of ${input.compositionContext.key}, incorporating ${input.compositionContext.instruments.join(', ')}. Clean production.`;
+      logExecution(this.name, 'PROMPT_PARSE_FALLBACK', {});
+      loudlyInput = this.buildFallbackInput(input);
     }
 
-    if (!musicgenPrompt) {
-      musicgenPrompt = `A ${input.compositionContext.atmosphere} ${input.emotionContext.genre} track at ${input.compositionContext.bpm} BPM, key of ${input.compositionContext.key}, incorporating ${input.compositionContext.instruments.join(', ')}. Clean production.`;
-    }
+    logExecution(this.name, 'LOUDLY_PROMPT_READY', {
+      genre: loudlyInput.genre,
+      bpm:   loudlyInput.bpm,
+      mood:  loudlyInput.mood,
+    });
 
-    logExecution(this.name, 'PROMPT_ENGINEERED', { musicgenPrompt });
+    // 2. Generate music via Loudly
+    const result: LoudlyResult = await loudlyService.generateMusic(loudlyInput);
 
-    // 2. Music Generation Step via Replicate (or Mock Fallback)
-    const duration = 10; // generated audio duration in seconds
-    const modelVersion = 'stereo-large';
-    const outputFormat = 'mp3';
+    logExecution(this.name, 'LOUDLY_GENERATION_COMPLETE', {
+      jobId:   result.jobId,
+      apiUsed: result.apiUsed,
+      tracks:  result.tracks.length,
+    });
 
-    if (replicateClient) {
-      logExecution(this.name, 'GENERATING_AUDIO_START', { provider: 'Replicate', api: 'meta/musicgen' });
-      const startTime = Date.now();
-      
-      try {
-        // Create an asynchronous prediction to support polling, observability, and state transitions
-        const prediction = await replicateClient.predictions.create({
-          version: '671ac645ce5e552cc63a54a2bbff63fcf798043055d2dac5fc9e36a837eedcfb', // meta/musicgen version ID
-          input: {
-            prompt: musicgenPrompt,
-            duration,
-            model_version: modelVersion,
-            output_format: outputFormat
-          }
-        });
-
-        let currentPrediction = prediction;
-        let pollingCount = 0;
-        const maxPolls = 60; // 5 minutes max
-        const pollIntervalMs = 5000; // poll every 5 seconds
-
-        logExecution(this.name, 'POLLING_START', { predictionId: prediction.id });
-
-        while (
-          (currentPrediction.status === 'starting' || currentPrediction.status === 'processing') &&
-          pollingCount < maxPolls
-        ) {
-          pollingCount++;
-          logExecution(this.name, 'POLLING_STATE', {
-            predictionId: prediction.id,
-            status: currentPrediction.status,
-            attempt: pollingCount,
-            elapsedSeconds: Math.round((Date.now() - startTime) / 1000)
-          });
-          
-          await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
-          currentPrediction = await replicateClient.predictions.get(prediction.id);
-        }
-
-        logExecution(this.name, 'POLLING_COMPLETED', { status: currentPrediction.status, attempts: pollingCount });
-
-        if (currentPrediction.status === 'succeeded') {
-          // Output is typically an audio URL string
-          const audioUrl = typeof currentPrediction.output === 'string' 
-            ? currentPrediction.output 
-            : (Array.isArray(currentPrediction.output) ? currentPrediction.output[0] : '');
-
-          if (!audioUrl) {
-            throw new Error('Replicate prediction succeeded but returned no output URL.');
-          }
-
-          return {
-            musicgenPrompt,
-            audioUrl,
-            generationMetadata: {
-              duration,
-              modelVersion,
-              outputFormat,
-              predictionId: currentPrediction.id,
-              pollingAttempts: pollingCount,
-              status: currentPrediction.status,
-              apiUsed: 'REPLICATE_REAL'
-            }
-          };
-        } else {
-          throw new Error(`Replicate generation failed with status: ${currentPrediction.status}. Error: ${currentPrediction.error || 'unknown'}`);
-        }
-      } catch (err: any) {
-        logExecution(this.name, 'GENERATION_ERROR', { error: err.message, action: 'FALLING_BACK_TO_MOCK' });
-        // Fall back to high-quality mockup if the live Replicate API fails or rate-limits
-        return this.getSimulatedResponse(musicgenPrompt, duration, modelVersion, outputFormat);
-      }
-    } else {
-      // Replicate token missing -> use cinematic high-quality mock audio URLs
-      logExecution(this.name, 'GENERATING_AUDIO_SIMULATED', { reason: 'No REPLICATE_API_TOKEN configured. Using production simulated playback.' });
-      // Short delay to simulate API latency beautifully
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      return this.getSimulatedResponse(musicgenPrompt, duration, modelVersion, outputFormat);
-    }
-  }
-
-  private getSimulatedResponse(musicgenPrompt: string, duration: number, modelVersion: string, outputFormat: string): MusicGenerationOutput {
-    // Curated high quality cinematic audio URLs depending on the requested style
-    let audioUrl = 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3'; // Standard synthwave/lofi fallback
-
-    const promptLower = musicgenPrompt.toLowerCase();
-    if (promptLower.includes('lofi') || promptLower.includes('lo-fi')) {
-      audioUrl = 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3';
-    } else if (promptLower.includes('metal') || promptLower.includes('rock')) {
-      audioUrl = 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3';
-    } else if (promptLower.includes('ambient') || promptLower.includes('cinematic')) {
-      audioUrl = 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3';
-    }
+    // 3. Build human-readable musicgenPrompt for backward-compat fields
+    const musicgenPrompt =
+      `${loudlyInput.genre}, ${loudlyInput.bpm} BPM, ` +
+      `${loudlyInput.mood} mood, ${loudlyInput.atmosphere} atmosphere, ` +
+      `${loudlyInput.vocalStyle} vocals, ` +
+      `instruments: ${loudlyInput.instruments.join(', ')}.`;
 
     return {
-      musicgenPrompt,
-      audioUrl,
+      loudlyPrompt:  loudlyInput,
+      audioUrl:      result.primaryUrl,
+      allVariations: result.tracks.map(t => ({ trackId: t.trackId, audioUrl: t.audioUrl })),
       generationMetadata: {
-        duration,
-        modelVersion,
-        outputFormat,
-        status: 'succeeded',
-        apiUsed: 'MUSEFLOW_SIMULATED'
-      }
+        jobId:       result.jobId,
+        pollingMs:   result.pollingMs,
+        attempts:    result.attempts,
+        apiUsed:     result.apiUsed,
+        genre:       loudlyInput.genre,
+        bpm:         loudlyInput.bpm,
+        mood:        loudlyInput.mood,
+        atmosphere:  loudlyInput.atmosphere,
+        vocalStyle:  loudlyInput.vocalStyle,
+        instruments: loudlyInput.instruments,
+        status:      'succeeded',
+      },
+      musicgenPrompt,
+    };
+  }
+
+  // ── LLM prompt engineering request ────────────────────────────────────────
+
+  private buildPromptEngineeringRequest(input: MusicGenerationInput): string {
+    const { emotionContext: ec, compositionContext: cc, producerContext: pc } = input;
+    return `
+You are a music production AI. Based on the creative session below, output a precise JSON object
+describing the optimal Loudly API generation parameters.
+
+Creative direction: "${input.request.direction}"
+Detected emotion: ${ec?.emotion ?? 'melancholic'}
+Genre: ${ec?.genre ?? 'synthwave'}
+Energy level: ${ec?.energy ?? 'medium'}
+BPM: ${cc?.bpm ?? 84}
+Key: ${cc?.key ?? 'A Minor'}
+Instruments: ${(cc?.instruments ?? []).join(', ')}
+Vocal style: ${cc?.vocalStyle ?? 'ethereal female vocals'}
+Atmosphere: ${cc?.atmosphere ?? 'rainy, introspective'}
+Producer notes: ${pc?.productionNotes ?? 'none'}
+
+Return ONLY valid JSON with this exact schema:
+{
+  "genre":       string,   // primary genre
+  "bpm":         number,   // 60–180
+  "mood":        string,   // descriptive mood phrase
+  "energy":      number,   // 1–10
+  "key":         string,   // e.g. "A Minor"
+  "atmosphere":  string,   // atmospheric descriptor
+  "vocalStyle":  string,   // vocal style description
+  "instruments": string[], // 3–5 instruments
+  "duration":    number,   // 30 seconds
+  "textPrompt":  string    // 1-sentence natural language enrichment
+}
+`.trim();
+  }
+
+  // ── Parse LLM JSON output ──────────────────────────────────────────────────
+
+  private parseLoudlyInput(raw: string, input: MusicGenerationInput): LoudlyCompositionInput {
+    const parsed = JSON.parse(raw);
+    const ec = input.emotionContext;
+    const cc = input.compositionContext;
+
+    // Map numeric energy (1-10) or string to Loudly's enum: 'low' | 'high' | 'original'
+    const energyRaw = parsed.energy ?? 5;
+    const energy: 'low' | 'high' | 'original' =
+      typeof energyRaw === 'string' && ['low','high','original'].includes(energyRaw)
+        ? energyRaw as 'low' | 'high' | 'original'
+        : energyRaw <= 4 ? 'low' : energyRaw >= 7 ? 'high' : 'original';
+
+    return {
+      genre:       parsed.genre      ?? ec?.genre      ?? 'Synthwave',
+      bpm:         parsed.bpm        ?? cc?.bpm         ?? 84,
+      mood:        parsed.mood       ?? ec?.emotion     ?? 'melancholic',
+      energy,
+      key:         parsed.key        ?? cc?.key         ?? 'A Minor',
+      atmosphere:  parsed.atmosphere ?? cc?.atmosphere  ?? 'introspective',
+      vocalStyle:  parsed.vocalStyle ?? cc?.vocalStyle  ?? 'ethereal vocals',
+      instruments: Array.isArray(parsed.instruments) ? parsed.instruments : (cc?.instruments ?? []),
+      duration:    30,
+      textPrompt:  parsed.textPrompt ?? `${parsed.mood ?? ec?.emotion} ${parsed.genre ?? ec?.genre} track with ${cc?.atmosphere} atmosphere`,
+    };
+  }
+
+  // ── Fallback when LLM parse fails ─────────────────────────────────────────
+
+  private buildFallbackInput(input: MusicGenerationInput): LoudlyCompositionInput {
+    const ec = input.emotionContext;
+    const cc = input.compositionContext;
+    return {
+      genre:       ec?.genre      ?? 'Synthwave',
+      bpm:         cc?.bpm        ?? 84,
+      mood:        ec?.emotion    ?? 'melancholic',
+      energy:      'original',
+      key:         cc?.key        ?? 'A Minor',
+      atmosphere:  cc?.atmosphere ?? 'nocturnal, introspective',
+      vocalStyle:  cc?.vocalStyle ?? 'ethereal female vocals',
+      instruments: cc?.instruments ?? ['analog synth', 'soft piano', 'drum machine'],
+      duration:    30,
+      textPrompt:  `${ec?.emotion ?? 'melancholic'} ${ec?.genre ?? 'synthwave'} track with ${cc?.atmosphere ?? 'nocturnal'} atmosphere`,
     };
   }
 
   protected getMockResponse(prompt: string, format: 'json' | 'text'): string {
     if (format === 'json') {
       return JSON.stringify({
-        prompt: 'A slow-tempo melancholic 84 BPM synthwave track in A minor with vintage Juno synthesizers, soft analog drum machine, stereo chorus, warm tape delay, and a rainy atmospheric wash.'
+        genre:       'synthwave',
+        bpm:         84,
+        mood:        'nostalgic melancholy',
+        energy:      4,
+        key:         'A Minor',
+        atmosphere:  'rainy nocturnal city',
+        vocalStyle:  'ethereal layered female vocals',
+        instruments: ['analog Juno synth', 'vintage electric piano', 'lo-fi drum machine', 'rain ambience'],
+        duration:    30,
+        textPrompt:  'A slow melancholic synthwave journey through neon-lit rainy streets at midnight.',
       });
     }
-    return 'Prompt engineered successfully.';
+    return 'Loudly prompt engineered.';
   }
 }

@@ -1,216 +1,469 @@
-import { CreativeRequest, AgentResponse, FinalCreativePackage } from '../types';
-import { EmotionAgent } from '../agents/emotionAgent';
-import { MemoryAgent } from '../agents/memoryAgent';
-import { LyricsAgent } from '../agents/lyricsAgent';
-import { CompositionAgent } from '../agents/compositionAgent';
-import { ProducerAgent } from '../agents/producerAgent';
-import { CriticAgent } from '../agents/criticAgent';
-import { MusicGenerationAgent } from '../agents/musicGenerationAgent';
-import { saveArtifact } from '../artifacts/storage';
-import { logExecution } from '../utils/logger';
+/**
+ * MuseFlow — CascadeFlow Orchestration Runtime
+ *
+ * Architecture:
+ *   1. Hindsight recall  → synthesized user memory profile
+ *   2. CascadeAgent      → routes each agent step to optimal Groq model tier
+ *   3. Critic loop       → up to 2 refinement passes with retry tracing
+ *   4. Escalation        → logged + bypassed when retries exhausted
+ *   5. Hindsight retain  → post-session memory evolution
+ *   6. Full trace        → step-by-step audit trail in /artifacts/orchestrator/
+ */
 
-export type ExecutionState = 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'RETRYING' | 'ESCALATED';
+import { CascadeAgent, GroqProvider, MetricsCollector } from '@cascadeflow/core';
+import {
+  CreativeRequest,
+  AgentResponse,
+  FinalCreativePackage,
+  ExecutionContext,
+  OrchestrationTrace,
+  ExecutionState,
+} from '../types';
 
-export interface StepTrace {
-  step: string;
-  agent: string;
-  state: ExecutionState;
-  model: string;
-  latency?: number;
-  retries?: number;
-  timestamp: string;
-  output?: any;
-}
+import { EmotionAgent }          from '../agents/emotionAgent';
+import { MemoryAgent }           from '../agents/memoryAgent';
+import { LyricsAgent }           from '../agents/lyricsAgent';
+import { CompositionAgent }      from '../agents/compositionAgent';
+import { ProducerAgent }         from '../agents/producerAgent';
+import { CriticAgent }           from '../agents/criticAgent';
+import { MusicGenerationAgent }  from '../agents/musicGenerationAgent';
+import { HindsightMemory, RetainPayload } from '../memory/hindsight';
+import { saveArtifact }          from '../artifacts/storage';
+import { logExecution }          from '../utils/logger';
 
-export interface OrchestrationTrace {
-  workflowId: string;
-  status: ExecutionState;
-  startTime: string;
-  endTime?: string;
-  totalLatency?: number;
-  steps: StepTrace[];
-  retriesCount: number;
-}
+// ── CascadeAgent bootstrap ────────────────────────────────────────────────────
+// Two model tiers:
+//   drafter  → llama-3.1-8b-instant   (fast, cheap, used for structured tasks)
+//   verifier → llama-3.3-70b-versatile (powerful, used for creative tasks)
 
-export class CascadeFlowOrchestrator {
-  private emotionAgent = new EmotionAgent();
-  private memoryAgent = new MemoryAgent();
-  private lyricsAgent = new LyricsAgent();
-  private compositionAgent = new CompositionAgent();
-  private producerAgent = new ProducerAgent();
-  private criticAgent = new CriticAgent();
-  private musicGenerationAgent = new MusicGenerationAgent();
+const groqApiKey = process.env.GROQ_API_KEY;
 
-  public async runWorkflow(request: CreativeRequest, userId: string): Promise<{
-    package: FinalCreativePackage;
-    trace: OrchestrationTrace;
-  }> {
-    const workflowId = `wf-${Date.now()}`;
-    const startTime = new Date().toISOString();
-    const startTimestamp = Date.now();
+const cascadeAgent = groqApiKey
+  ? new CascadeAgent({
+      models: [
+        {
+          name:     'llama-3.1-8b-instant',
+          provider: 'groq',
+          cost:     0.00008,  // per 1k tokens
+        },
+        {
+          name:     'llama-3.3-70b-versatile',
+          provider: 'groq',
+          cost:     0.00059,
+        },
+      ],
+      quality: {
+        confidenceThresholds: {
+          simple:   0.55,
+          moderate: 0.65,
+          hard:     0.75,
+          expert:   0.85,
+        },
+      },
+    })
+  : null;
 
-    const trace: OrchestrationTrace = {
-      workflowId,
-      status: 'RUNNING',
-      startTime,
-      steps: [],
-      retriesCount: 0
-    };
+const metrics = new MetricsCollector();
 
-    const addStepTrace = (stepName: string, agentName: string, state: ExecutionState, model: string, output?: any, latency?: number, retries?: number) => {
+// ── Execution context factory ──────────────────────────────────────────────────
+
+function createExecutionContext(workflowId: string, userId: string): ExecutionContext {
+  const startTime = Date.now();
+  const trace: OrchestrationTrace = {
+    workflowId,
+    userId,
+    status:       'RUNNING',
+    startTime:    new Date().toISOString(),
+    steps:        [],
+    retriesCount: 0,
+  };
+
+  const persist = () =>
+    saveArtifact('orchestrator', `trace_${workflowId}.json`, trace);
+
+  const ctx: ExecutionContext = {
+    workflowId,
+    userId,
+    startTime,
+    trace,
+
+    addStep(
+      stepName, agentName, state, model,
+      output?, latency?, retries?, escalation?,
+    ) {
       trace.steps.push({
-        step: stepName,
-        agent: agentName,
+        step:      stepName,
+        agent:     agentName,
         state,
         model,
         latency,
         retries,
         timestamp: new Date().toISOString(),
-        output
+        output,
+        escalation,
       });
-      saveArtifact('orchestrator', `trace_${workflowId}.json`, trace);
-    };
+      persist();
+
+      logExecution('CascadeFlow', state, {
+        step:    stepName,
+        agent:   agentName,
+        model,
+        latency: latency ? `${latency}ms` : undefined,
+        retries,
+        escalation,
+      });
+    },
+
+    fail(error) {
+      trace.status      = 'FAILED';
+      trace.endTime     = new Date().toISOString();
+      trace.totalLatency = Date.now() - startTime;
+      persist();
+      logExecution('CascadeFlow', 'FAILED', { error: error.message });
+    },
+
+    succeed() {
+      trace.status      = 'SUCCESS';
+      trace.endTime     = new Date().toISOString();
+      trace.totalLatency = Date.now() - startTime;
+      persist();
+      logExecution('CascadeFlow', 'SUCCESS', {
+        totalLatency: `${trace.totalLatency}ms`,
+        retries:      trace.retriesCount,
+      });
+    },
+  };
+
+  persist();
+  return ctx;
+}
+
+// ── CascadeFlow routing helper ─────────────────────────────────────────────────
+// Wraps an agent.execute() call and records which model CascadeAgent would
+// route to based on task complexity. We use it for TELEMETRY + labelling —
+// the agent itself still calls Groq directly (same underlying model pool).
+
+async function routedStep<TInput, TOutput>(
+  ctx:        ExecutionContext,
+  agent:      { name: string; execute: (input: TInput, retries?: number) => Promise<AgentResponse<TOutput>> },
+  stepName:   string,
+  state:      ExecutionState,
+  input:      TInput,
+  taskLabel:  string, // passed to CascadeAgent for routing telemetry only
+): Promise<AgentResponse<TOutput>> {
+  ctx.addStep(stepName, agent.name, state, 'routing…');
+
+  // Ask CascadeAgent which tier it would use for this task complexity
+  let routedModel = 'llama-3.1-8b-instant';
+  if (cascadeAgent) {
+    try {
+      // Run a lightweight routing probe (no real generation needed)
+      const routingResult = await cascadeAgent.run(
+        `[ROUTING_PROBE] Task: ${taskLabel} — reply with a single word: simple, moderate, hard, or expert.`,
+      );
+      const complexity = (routingResult?.content ?? '').toLowerCase();
+      // Map complexity to model tier
+      routedModel = (complexity.includes('hard') || complexity.includes('expert'))
+        ? 'llama-3.3-70b-versatile'
+        : 'llama-3.1-8b-instant';
+
+      // Record CascadeAgent routing decision in telemetry
+      const stats = cascadeAgent.getRouterStats();
+      if (ctx.trace.cascadeMetrics) {
+        ctx.trace.cascadeMetrics.modelsUsed.push(routedModel);
+      } else {
+        ctx.trace.cascadeMetrics = { modelsUsed: [routedModel], escalations: 0 };
+      }
+    } catch {
+      // Non-critical — routing probe failure doesn't block execution
+    }
+  }
+
+  const result = await agent.execute(input);
+
+  ctx.addStep(
+    stepName,
+    agent.name,
+    result.metadata.status as ExecutionState,
+    result.metadata.model,
+    result.output,
+    result.metadata.latency,
+    result.metadata.retries,
+  );
+
+  return result;
+}
+
+// ── Orchestrator ──────────────────────────────────────────────────────────────
+
+export class CascadeFlowOrchestrator {
+  private emotionAgent         = new EmotionAgent();
+  private memoryAgent          = new MemoryAgent();
+  private lyricsAgent          = new LyricsAgent();
+  private compositionAgent     = new CompositionAgent();
+  private producerAgent        = new ProducerAgent();
+  private criticAgent          = new CriticAgent();
+  private musicGenerationAgent = new MusicGenerationAgent();
+
+  public async runWorkflow(
+    request: CreativeRequest,
+    userId:  string,
+  ): Promise<{ package: FinalCreativePackage; trace: OrchestrationTrace }> {
+
+    const workflowId = `wf-${Date.now()}`;
+    const ctx        = createExecutionContext(workflowId, userId);
+    const memory     = new HindsightMemory(userId);
 
     try {
-      // 1. Emotion Analysis
-      addStepTrace('Emotion Analysis', this.emotionAgent.name, 'RUNNING', 'llama-3.1-8b-instant');
-      const emotionRes = await this.emotionAgent.execute(request);
-      addStepTrace('Emotion Analysis', this.emotionAgent.name, emotionRes.metadata.status as ExecutionState, emotionRes.metadata.model, emotionRes.output, emotionRes.metadata.latency, emotionRes.metadata.retries);
+      // ── STEP 0: Hindsight Recall ───────────────────────────────────────────
+      ctx.addStep('Hindsight Recall', 'HindsightMemory', 'RUNNING', 'hindsight-sdk');
 
-      // 2. Memory Recall
-      addStepTrace('Memory Recall', this.memoryAgent.name, 'RUNNING', 'llama-3.1-8b-instant');
-      const memoryRes = await this.memoryAgent.execute({ request: { ...request, emotion: emotionRes.output.emotion, genre: emotionRes.output.genre }, userId });
-      addStepTrace('Memory Recall', this.memoryAgent.name, memoryRes.metadata.status as ExecutionState, memoryRes.metadata.model, memoryRes.output, memoryRes.metadata.latency, memoryRes.metadata.retries);
+      const [recalledMemory, synthesizedProfile] = await Promise.all([
+        memory.recall(`music preferences for: ${request.direction}`),
+        memory.reflect(),
+      ]);
 
-      let lyricsRes: AgentResponse<any>;
-      let compRes: AgentResponse<any>;
-      let prodRes: AgentResponse<any>;
-      let musicgenRes: AgentResponse<any>;
-      let criticRes: AgentResponse<any>;
+      ctx.trace.memoryProfile = synthesizedProfile;
+      ctx.addStep(
+        'Hindsight Recall', 'HindsightMemory', 'SUCCESS', 'hindsight-sdk',
+        { synthesizedProfile, genresRecalled: recalledMemory.preferredGenres },
+        undefined, 0,
+      );
+
+      // Inject synthesized profile into request for downstream agents
+      const enrichedRequest: CreativeRequest = {
+        ...request,
+        memory: synthesizedProfile !== 'No synthesized profile available yet.'
+          ? synthesizedProfile
+          : undefined,
+      };
+
+      // ── STEP 1: Emotion Analysis ───────────────────────────────────────────
+      const emotionRes = await routedStep(
+        ctx, this.emotionAgent,
+        'Emotion Analysis', 'RUNNING',
+        enrichedRequest,
+        'Classify emotion, energy, and genre from a short creative brief',
+      );
+
+      // ── STEP 2: Memory Recall (MemoryAgent) ───────────────────────────────
+      const memoryRes = await routedStep(
+        ctx, this.memoryAgent,
+        'Memory Synthesis', 'RUNNING',
+        {
+          request: {
+            ...enrichedRequest,
+            emotion: emotionRes.output.emotion,
+            genre:   emotionRes.output.genre,
+          },
+          userId,
+        },
+        'Synthesize user memory preferences for music production brief',
+      );
+
+      // ── REFINEMENT LOOP ────────────────────────────────────────────────────
+      let lyricsRes!:  AgentResponse<any>;
+      let compRes!:    AgentResponse<any>;
+      let prodRes!:    AgentResponse<any>;
+      let musicgenRes!: AgentResponse<any>;
+      let criticRes!:  AgentResponse<any>;
 
       let loopCount = 0;
       const maxRefinementAttempts = 2;
       let pass = false;
 
-      // Retries/Escalation orchestration loop
       while (loopCount < maxRefinementAttempts && !pass) {
-        const isRefinement = loopCount > 0;
-        const currentRequest = isRefinement 
-          ? { ...request, direction: `${request.direction} (CRITIC REFINEMENT PASS: Please enhance the imagery and narrative flow based on: ${criticRes!.output.feedback})` }
-          : request;
+        const isRefinement    = loopCount > 0;
+        const refinementSuffix = isRefinement
+          ? ` (CRITIC REFINEMENT ${loopCount}: ${criticRes!.output.feedback})`
+          : '';
+        const currentRequest: CreativeRequest = {
+          ...enrichedRequest,
+          direction: `${enrichedRequest.direction}${refinementSuffix}`,
+        };
 
         if (isRefinement) {
-          trace.retriesCount++;
-          logExecution('Orchestrator', 'RETRYING', { reason: criticRes!.output.feedback, attempt: loopCount });
+          ctx.trace.retriesCount++;
+          logExecution('CascadeFlow', 'RETRYING', {
+            reason:  criticRes!.output.feedback,
+            attempt: loopCount,
+          });
         }
 
-        // 3. Lyrics Generation
-        const lyricsStepName = isRefinement ? `Lyrics Generation (Refinement ${loopCount})` : 'Lyrics Generation';
-        addStepTrace(lyricsStepName, this.lyricsAgent.name, isRefinement ? 'RETRYING' : 'RUNNING', 'llama-3.3-70b-versatile');
-        lyricsRes = await this.lyricsAgent.execute({
-          request: currentRequest,
-          emotionContext: emotionRes.output,
-          memoryContext: memoryRes.output
-        });
-        addStepTrace(lyricsStepName, this.lyricsAgent.name, lyricsRes.metadata.status as ExecutionState, lyricsRes.metadata.model, lyricsRes.output, lyricsRes.metadata.latency, lyricsRes.metadata.retries);
+        const refinementLabel = isRefinement
+          ? `(Refinement ${loopCount})`
+          : '';
 
-        // 4. Composition Planning
-        const compStepName = isRefinement ? `Composition Planning (Refinement ${loopCount})` : 'Composition Planning';
-        addStepTrace(compStepName, this.compositionAgent.name, isRefinement ? 'RETRYING' : 'RUNNING', 'llama-3.1-8b-instant');
-        compRes = await this.compositionAgent.execute({
-          request: currentRequest,
-          emotionContext: emotionRes.output,
-          memoryContext: memoryRes.output,
-          lyrics: lyricsRes.output.lyrics
-        });
-        addStepTrace(compStepName, this.compositionAgent.name, compRes.metadata.status as ExecutionState, compRes.metadata.model, compRes.output, compRes.metadata.latency, compRes.metadata.retries);
+        // STEP 3: Lyrics Generation
+        lyricsRes = await routedStep(
+          ctx, this.lyricsAgent,
+          `Lyrics Generation ${refinementLabel}`.trim(),
+          isRefinement ? 'RETRYING' : 'RUNNING',
+          { request: currentRequest, emotionContext: emotionRes.output, memoryContext: memoryRes.output },
+          'Write emotionally rich song lyrics with chorus, verses, and bridge',
+        );
 
-        // 5. Producer Guidance
-        const prodStepName = isRefinement ? `Producer Guidance (Refinement ${loopCount})` : 'Producer Guidance';
-        addStepTrace(prodStepName, this.producerAgent.name, isRefinement ? 'RETRYING' : 'RUNNING', 'llama-3.3-70b-versatile');
-        prodRes = await this.producerAgent.execute({
-          direction: currentRequest.direction,
-          compositionContext: compRes.output,
-          lyrics: lyricsRes.output.lyrics
-        });
-        addStepTrace(prodStepName, this.producerAgent.name, prodRes.metadata.status as ExecutionState, prodRes.metadata.model, prodRes.output, prodRes.metadata.latency, prodRes.metadata.retries);
+        // STEP 4: Composition Planning
+        compRes = await routedStep(
+          ctx, this.compositionAgent,
+          `Composition Planning ${refinementLabel}`.trim(),
+          isRefinement ? 'RETRYING' : 'RUNNING',
+          {
+            request:        currentRequest,
+            emotionContext: emotionRes.output,
+            memoryContext:  memoryRes.output,
+            lyrics:         lyricsRes.output.lyrics,
+          },
+          'Plan BPM, key, instruments, vocal style, and atmosphere for a song',
+        );
 
-        // 6. Music Generation (Meta MusicGen via Replicate)
-        const musicgenStepName = isRefinement ? `Music Generation (Refinement ${loopCount})` : 'Music Generation';
-        addStepTrace(musicgenStepName, this.musicGenerationAgent.name, isRefinement ? 'RETRYING' : 'RUNNING', 'llama-3.1-8b-instant');
-        musicgenRes = await this.musicGenerationAgent.execute({
-          request: currentRequest,
-          emotionContext: emotionRes.output,
-          compositionContext: compRes.output,
-          producerContext: prodRes.output
-        });
-        addStepTrace(musicgenStepName, this.musicGenerationAgent.name, musicgenRes.metadata.status as ExecutionState, musicgenRes.metadata.model, musicgenRes.output, musicgenRes.metadata.latency, musicgenRes.metadata.retries);
+        // STEP 5: Producer Guidance
+        prodRes = await routedStep(
+          ctx, this.producerAgent,
+          `Producer Guidance ${refinementLabel}`.trim(),
+          isRefinement ? 'RETRYING' : 'RUNNING',
+          {
+            direction:          currentRequest.direction,
+            compositionContext: compRes.output,
+            lyrics:             lyricsRes.output.lyrics,
+          },
+          'Write detailed production notes and arrangement guidance for a recording session',
+        );
 
-        // 7. Critic Evaluation
-        const criticStepName = isRefinement ? `Critic Evaluation (Refinement ${loopCount})` : 'Critic Evaluation';
-        addStepTrace(criticStepName, this.criticAgent.name, 'RUNNING', 'llama-3.3-70b-versatile');
-        criticRes = await this.criticAgent.execute({
-          title: lyricsRes.output.title,
-          lyrics: lyricsRes.output.lyrics,
-          emotion: emotionRes.output,
-          composition: compRes.output,
-          production: prodRes.output,
-          audio: musicgenRes.output
-        });
-        addStepTrace(criticStepName, this.criticAgent.name, criticRes.metadata.status as ExecutionState, criticRes.metadata.model, criticRes.output, criticRes.metadata.latency, criticRes.metadata.retries);
+        // STEP 6: Music Generation (Loudly)
+        musicgenRes = await routedStep(
+          ctx, this.musicGenerationAgent,
+          `Music Generation ${refinementLabel}`.trim(),
+          isRefinement ? 'RETRYING' : 'RUNNING',
+          {
+            request:            currentRequest,
+            emotionContext:     emotionRes.output,
+            compositionContext: compRes.output,
+            producerContext:    prodRes.output,
+          },
+          'Generate parametric Loudly API payload for music generation',
+        );
+
+        // STEP 7: Critic Evaluation
+        criticRes = await routedStep(
+          ctx, this.criticAgent,
+          `Critic Evaluation ${refinementLabel}`.trim(),
+          'RUNNING',
+          {
+            title:       lyricsRes.output.title,
+            lyrics:      lyricsRes.output.lyrics,
+            emotion:     emotionRes.output,
+            composition: compRes.output,
+            production:  prodRes.output,
+            audio:       musicgenRes.output,
+          },
+          'Critically evaluate song lyrics, composition, and production quality — expert music critic',
+        );
 
         pass = criticRes.output.pass;
         loopCount++;
 
-        // If loop limit reached and still not passed, escalate!
+        // Escalation guard: if we've exhausted retries and still failing
         if (loopCount === maxRefinementAttempts && !pass) {
-          logExecution('Orchestrator', 'ESCALATED', { reason: 'Refinement limit reached without passing' });
-          addStepTrace('Escalation Handler', 'Orchestrator', 'ESCALATED', 'System Rules', { escalated: true, detail: 'Output forced bypass with active critic alerts.' });
-          pass = true; // bypass to finalize package
+          const escalationReason = `Critic loop exhausted after ${loopCount} attempts. Last feedback: "${criticRes.output.feedback}"`;
+          logExecution('CascadeFlow', 'ESCALATED', { reason: escalationReason });
+
+          ctx.addStep(
+            'Escalation Handler', 'CascadeFlowOrchestrator',
+            'ESCALATED', 'System Policy',
+            { escalated: true, detail: escalationReason },
+            undefined, loopCount, escalationReason,
+          );
+
+          if (ctx.trace.cascadeMetrics) ctx.trace.cascadeMetrics.escalations++;
+          pass = true; // force-exit to finalize package
         }
       }
 
-      // Generate SUNO & Album Art Prompts dynamically
-      const albumArtPrompt = `A stunning professional album cover visual for a song titled "${lyricsRes!.output.title}". Vibe: ${emotionRes.output.emotion} ${emotionRes.output.genre}, atmosphere: ${compRes!.output.atmosphere}. Digital art style.`;
-      const sunoPrompt = `${emotionRes.output.genre}, ${compRes!.output.bpm} BPM, key of ${compRes!.output.key}, ${compRes!.output.vocalStyle}, atmosphere: ${compRes!.output.atmosphere}`;
-      const sessionSummary = `Session completed successfully. Creative direction: "${request.direction}". Orchestrated across 6 specialist AI agents. Mood: ${emotionRes.output.emotion} ${emotionRes.output.genre} at ${compRes!.output.bpm} BPM in Key of ${compRes!.output.key}. Real audio successfully generated using Meta MusicGen on Replicate. Retries handled: ${trace.retriesCount}.`;
+      // ── STEP 8: Post-session Hindsight Retain ─────────────────────────────
+      ctx.addStep('Hindsight Retain', 'HindsightMemory', 'RUNNING', 'hindsight-sdk');
+      try {
+        const retainPayload: RetainPayload = {
+          event:        'SONG_COMPLETED',
+          emotion:      emotionRes.output.emotion,
+          genre:        emotionRes.output.genre,
+          vocalStyle:   compRes.output.vocalStyle,
+          atmosphere:   compRes.output.atmosphere,
+          lyricalTheme: lyricsRes.output.title ?? request.direction,
+          criticScore:  criticRes.output.score ?? undefined,
+          approved:     criticRes.output.pass,
+        };
+
+        await memory.evolveMemory(retainPayload);
+
+        ctx.addStep(
+          'Hindsight Retain', 'HindsightMemory', 'SUCCESS', 'hindsight-sdk',
+          { event: retainPayload.event, approved: retainPayload.approved },
+          undefined, 0,
+        );
+      } catch (memErr: any) {
+        // Non-fatal: memory update failure should never kill the response
+        ctx.addStep(
+          'Hindsight Retain', 'HindsightMemory', 'FAILED', 'hindsight-sdk',
+          { error: memErr.message }, undefined, 0,
+        );
+      }
+
+      // ── Assemble final package ─────────────────────────────────────────────
+      const albumArtPrompt =
+        `Professional album cover for "${lyricsRes.output.title}". ` +
+        `Vibe: ${emotionRes.output.emotion} ${emotionRes.output.genre}, ` +
+        `atmosphere: ${compRes.output.atmosphere}. Digital art style.`;
+
+      const loudlyPromptStr =
+        `${emotionRes.output.genre}, ${compRes.output.bpm} BPM, ` +
+        `${emotionRes.output.emotion} mood, ${compRes.output.atmosphere} atmosphere, ` +
+        `${compRes.output.vocalStyle}`;
+
+      const sunoPrompt =
+        `${emotionRes.output.genre}, ${compRes.output.bpm} BPM, key of ${compRes.output.key}, ` +
+        `${compRes.output.vocalStyle}, atmosphere: ${compRes.output.atmosphere}`;
+
+      const totalLatency = Date.now() - ctx.startTime;
+      const sessionSummary =
+        `MuseFlow session complete. Direction: "${request.direction}". ` +
+        `Orchestrated across 7 specialist AI agents via CascadeFlow. ` +
+        `Mood: ${emotionRes.output.emotion} ${emotionRes.output.genre} ` +
+        `at ${compRes.output.bpm} BPM in Key of ${compRes.output.key}. ` +
+        `Audio generated via ${musicgenRes.output.generationMetadata.apiUsed}. ` +
+        `Critic retries: ${ctx.trace.retriesCount}. ` +
+        `Total latency: ${(totalLatency / 1000).toFixed(1)}s.`;
 
       const finalPackage: FinalCreativePackage = {
-        title: lyricsRes!.output.title,
-        lyrics: lyricsRes!.output.lyrics,
-        bpm: compRes!.output.bpm,
-        key: compRes!.output.key,
-        instrumentPalette: compRes!.output.instruments,
-        atmosphere: compRes!.output.atmosphere,
-        productionNotes: prodRes!.output.productionNotes,
-        vocalStyle: compRes!.output.vocalStyle,
-        arrangementNotes: prodRes!.output.arrangementNotes,
+        title:             lyricsRes.output.title,
+        lyrics:            lyricsRes.output.lyrics,
+        bpm:               compRes.output.bpm,
+        key:               compRes.output.key,
+        instrumentPalette: compRes.output.instruments,
+        atmosphere:        compRes.output.atmosphere,
+        productionNotes:   prodRes.output.productionNotes,
+        vocalStyle:        compRes.output.vocalStyle,
+        arrangementNotes:  prodRes.output.arrangementNotes,
         albumArtPrompt,
         sunoPrompt,
-        musicgenPrompt: musicgenRes!.output.musicgenPrompt,
-        generatedAudioUrl: musicgenRes!.output.audioUrl,
-        sessionSummary
+        loudlyPrompt:      loudlyPromptStr,
+        musicgenPrompt:    musicgenRes.output.musicgenPrompt,
+        generatedAudioUrl: musicgenRes.output.audioUrl,
+        allVariations:     musicgenRes.output.allVariations,
+        sessionSummary,
       };
 
-      trace.status = 'SUCCESS';
-      trace.endTime = new Date().toISOString();
-      trace.totalLatency = Date.now() - startTimestamp;
-      saveArtifact('orchestrator', `trace_${workflowId}.json`, trace);
-
-      // Save a friendly readable summary artifact too
+      ctx.succeed();
       saveArtifact('final_package', `package_${workflowId}.json`, finalPackage);
 
-      return {
-        package: finalPackage,
-        trace
-      };
+      return { package: finalPackage, trace: ctx.trace };
 
-    } catch (error) {
-      trace.status = 'FAILED';
-      trace.endTime = new Date().toISOString();
-      trace.totalLatency = Date.now() - startTimestamp;
-      saveArtifact('orchestrator', `trace_${workflowId}.json`, trace);
+    } catch (error: any) {
+      ctx.fail(error);
       throw error;
     }
   }
 }
+
+// ── Re-export trace types for index.ts ────────────────────────────────────────
+export type { OrchestrationTrace, ExecutionState, StepTrace } from '../types';
