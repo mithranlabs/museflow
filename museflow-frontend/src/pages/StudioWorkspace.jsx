@@ -63,19 +63,52 @@ export default function StudioWorkspace() {
           <p className="text-gray-600">Describe your musical vision — our AI agents will handle the rest.</p>
           
           <div className="space-y-4">
-            {['prompt', 'mood', 'story', 'genre', 'memory', 'journalEntry', 'emotion'].map((field) => (
-              <div key={field}>
-                <label className="block text-sm font-medium text-gray-700 capitalize mb-1">{field}</label>
-                <textarea
-                  name={field}
-                  rows={field === 'prompt' ? 3 : 2}
-                  value={formData[field]}
-                  onChange={handleChange}
-                  className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                  placeholder={`Enter ${field}...`}
-                />
+            {/* Main Prompt */}
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">Creative Direction Prompt</label>
+              <textarea
+                name="prompt"
+                rows={4}
+                value={formData.prompt}
+                onChange={handleChange}
+                className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:ring-2 focus:ring-indigo-500 focus:border-transparent shadow-sm text-sm"
+                placeholder="E.g., A nostalgic, atmospheric synthwave track with emotional, rainy ambient vocals..."
+              />
+            </div>
+
+            {/* Advanced Settings Accordion */}
+            <details className="group border border-gray-200 rounded-xl overflow-hidden bg-white">
+              <summary className="flex justify-between items-center font-medium px-4 py-3 cursor-pointer select-none text-gray-700 hover:bg-gray-50 transition text-sm">
+                <span>Advanced Options (Vibe, Emotion, Story)</span>
+                <span className="transition-transform duration-200 group-open:rotate-180">
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </span>
+              </summary>
+              <div className="p-4 border-t border-gray-200 space-y-4 bg-gray-50/50">
+                {[
+                  { name: 'genre', placeholder: 'E.g., synthwave, lo-fi, lofi hip-hop' },
+                  { name: 'mood', placeholder: 'E.g., wistful, nostalgic, energetic' },
+                  { name: 'emotion', placeholder: 'E.g., melancholic, dreamlike, euphoric' },
+                  { name: 'story', placeholder: 'E.g., driving through a rain-soaked neon city at night' },
+                  { name: 'memory', placeholder: 'E.g., memories of a lost future' },
+                  { name: 'journalEntry', label: 'Journal Entry', placeholder: 'E.g., reflected on past travels...' }
+                ].map((item) => (
+                  <div key={item.name}>
+                    <label className="block text-xs font-semibold text-gray-600 capitalize mb-1">{item.label || item.name}</label>
+                    <input
+                      type="text"
+                      name={item.name}
+                      value={formData[item.name]}
+                      onChange={handleChange}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-xs focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white shadow-sm"
+                      placeholder={item.placeholder}
+                    />
+                  </div>
+                ))}
               </div>
-            ))}
+            </details>
           </div>
           
           <button

@@ -39,30 +39,61 @@ export default function SongResultCard({ song, onSave, onDownload }) {
           </div>
         </div>
 
-        {/* Audio/MIDI Links */}
+        {/* Sleek Audio Player */}
+        {song.vocalsUrl && (
+          <div className="p-4 bg-indigo-50/50 border border-indigo-100/80 rounded-xl space-y-2">
+            <label className="block text-xs font-semibold text-indigo-700 uppercase tracking-wider">Play Mixed Track</label>
+            <audio src={song.vocalsUrl} controls className="w-full accent-indigo-600 rounded-lg" />
+          </div>
+        )}
+
+        {/* Audio Downloads */}
         <div className="flex flex-wrap gap-3 pt-2">
-          {song.compositionUrl && (
-            <a
-              href={song.compositionUrl}
-              download
-              onClick={(e) => {
-                e.preventDefault()
-                if (onDownload) onDownload('composition', song.compositionUrl)
-                else window.open(song.compositionUrl, '_blank')
-              }}
-              className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm transition"
-            >
-              <DownloadIcon className="w-4 h-4" /> MIDI
-            </a>
-          )}
           {song.vocalsUrl && (
-            <a
-              href={song.vocalsUrl}
-              download
-              className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm transition"
+            <button
+              onClick={async () => {
+                try {
+                  const response = await fetch(song.vocalsUrl)
+                  const blob = await response.blob()
+                  const blobUrl = URL.createObjectURL(blob)
+                  const link = document.createElement('a')
+                  link.href = blobUrl
+                  link.download = `${song.songTitle || 'song'}.mp3`
+                  document.body.appendChild(link)
+                  link.click()
+                  document.body.removeChild(link)
+                  URL.revokeObjectURL(blobUrl)
+                } catch (err) {
+                  window.open(song.vocalsUrl, '_blank')
+                }
+              }}
+              className="flex items-center gap-2 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-xl text-sm transition shadow-sm"
             >
-              <DownloadIcon className="w-4 h-4" /> Vocals
-            </a>
+              <DownloadIcon className="w-4 h-4" /> Download Song (MP3)
+            </button>
+          )}
+          {song.compositionUrl && (
+            <button
+              onClick={async () => {
+                try {
+                  const response = await fetch(song.compositionUrl)
+                  const blob = await response.blob()
+                  const blobUrl = URL.createObjectURL(blob)
+                  const link = document.createElement('a')
+                  link.href = blobUrl
+                  link.download = `${song.songTitle || 'instrumental'}_instrumental.mp3`
+                  document.body.appendChild(link)
+                  link.click()
+                  document.body.removeChild(link)
+                  URL.revokeObjectURL(blobUrl)
+                } catch (err) {
+                  window.open(song.compositionUrl, '_blank')
+                }
+              }}
+              className="flex items-center gap-2 px-3.5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-xl text-sm transition"
+            >
+              <DownloadIcon className="w-4 h-4" /> Download Instrumental
+            </button>
           )}
         </div>
 
