@@ -258,8 +258,25 @@ PORT=3001
 | `src/memory/hindsight.ts` | **Rewritten** | Real Hindsight SDK: retain/recall/reflect + local fallback |
 | `src/services/loudly.ts` | **New** | Loudly API service with polling + retry |
 | `src/agents/musicGenerationAgent.ts` | **Rewritten** | Uses LoudlyService instead of Replicate |
-| `src/orchestrator/cascadeflow.ts` | **Rewritten** | CascadeAgent routing, ExecutionContext, 8-step workflow |
+| `src/orchestrator/cascadeflow.ts` | **Rewritten** | CascadeAgent routing, ExecutionContext, 8-step workflow, real-time `onEvent` streaming support |
 | `src/types/index.ts` | **Expanded** | ExecutionContext, StepTrace, MuseMemory, Loudly fields |
-| `src/index.ts` | **Expanded** | New memory routes, telemetry endpoint, startup banner |
+| `src/index.ts` | **Expanded** | New memory routes, telemetry endpoint, startup banner, and real-time Server-Sent Events `/api/orchestrate/stream` endpoint |
 | `src/agents/memoryAgent.ts` | **Fixed** | Aligned to new MuseMemory field names |
 | `.env.example` | **Updated** | Hindsight + Loudly keys documented |
+| `museflow-frontend/src/pages/StudioWorkspace.jsx` | **Rewritten** | Cyberpunk AI Orchestration Console with real-time logs, agent nodes dashboard, and music player player |
+
+---
+
+## Part 6 — Real-Time Streaming AI Orchestration
+
+To eliminate the static load times (30–40 seconds) during multi-agent music synthesis, a real-time event streaming interface has been built:
+
+1. **Server-Sent Events (SSE) Endpoint**: 
+   * `POST /api/orchestrate/stream` streams JSON packets in the native `text/event-stream` format.
+   * `runWorkflow` accept an `onEvent` callback, emitting status notifications as agents execute.
+2. **Dynamic UI Grid**:
+   * Displays all 11 agents. The cards light up (`idle` ➔ `RUNNING` ➔ `SUCCESS`/`RETRYING`) using Framer Motion animations.
+3. **Live Telemetry Terminal**:
+   * A scrolling command-line interface logs precise latency, model selections (e.g. `llama-3.1-8b` routing), and Critic Agent scores.
+4. **Permanent Library Persistence**:
+   * Completed songs are saved automatically to the database (`user_songs.json`), instantly visible in user playlists and song catalogs.
