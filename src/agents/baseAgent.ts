@@ -13,7 +13,7 @@ export abstract class BaseAgent<TInput, TOutput> {
   public name: string;
   protected model: string;
 
-  constructor(name: string, model: string = 'llama-3.3-70b-versatile') {
+  constructor(name: string, model: string = 'llama-3.1-8b-instant') {
     this.name = name;
     this.model = model;
   }

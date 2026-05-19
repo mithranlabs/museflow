@@ -26,7 +26,7 @@ export class CriticAgent extends BaseAgent<CriticAgentInput, CriticAgentOutput> 
   private static runCount = 0;
 
   constructor() {
-    super('CriticAgent', 'llama-3.3-70b-versatile');
+    super('CriticAgent', 'llama-3.1-8b-instant');
   }
 
   protected async process(input: CriticAgentInput): Promise<CriticAgentOutput> {

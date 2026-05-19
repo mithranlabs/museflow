@@ -16,7 +16,7 @@ interface LyricsAgentOutput {
 export class LyricsAgent extends BaseAgent<LyricsAgentInput, LyricsAgentOutput> {
   constructor() {
     // Stronger creative model
-    super('LyricsAgent', 'llama-3.3-70b-versatile');
+    super('LyricsAgent', 'llama-3.1-8b-instant');
   }
 
   protected async process(input: LyricsAgentInput): Promise<LyricsAgentOutput> {

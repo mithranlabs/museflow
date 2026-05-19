@@ -2,12 +2,14 @@ import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { getUserSongs } from '../services/api'
 import LoadingSpinner from '../components/common/LoadingSpinner'
-import { PlayIcon, Music2Icon, CalendarIcon } from 'lucide-react'
+import { PlayIcon, PauseIcon, DownloadIcon, Music2Icon, CalendarIcon } from 'lucide-react'
 import '../css/Playlist.css'
 
 export default function Playlist() {
   const [songs, setSongs] = useState([])
   const [loading, setLoading] = useState(true)
+  const [playingUrl, setPlayingUrl] = useState(null)
+  const [audio] = useState(() => new Audio())
 
   useEffect(() => {
     const fetchSongs = async () => {
@@ -17,6 +19,27 @@ export default function Playlist() {
     }
     fetchSongs()
   }, [])
+
+  useEffect(() => {
+    const handleEnded = () => setPlayingUrl(null)
+    audio.addEventListener('ended', handleEnded)
+    return () => {
+      audio.removeEventListener('ended', handleEnded)
+      audio.pause()
+    }
+  }, [audio])
+
+  const handlePlayToggle = (url) => {
+    if (!url) return
+    if (playingUrl === url) {
+      audio.pause()
+      setPlayingUrl(null)
+    } else {
+      audio.src = url
+      audio.play().catch(e => console.error("Playback failed:", e))
+      setPlayingUrl(url)
+    }
+  }
 
   if (loading) return <LoadingSpinner />
 
@@ -53,9 +76,43 @@ export default function Playlist() {
                   <h3 className="font-semibold">{song.title || 'Untitled'}</h3>
                   <p className="text-sm text-gray-500 flex items-center gap-1"><CalendarIcon className="w-3 h-3" /> {song.createdAt || 'Recently'}</p>
                 </div>
-                <button className="p-2 rounded-full bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition">
-                  <PlayIcon className="w-5 h-5" />
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handlePlayToggle(song.vocalsUrl || song.compositionUrl)}
+                    className={`p-2 rounded-full transition ${playingUrl === (song.vocalsUrl || song.compositionUrl) ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100'}`}
+                    title="Play / Pause"
+                  >
+                    {playingUrl === (song.vocalsUrl || song.compositionUrl) ? (
+                      <PauseIcon className="w-5 h-5" />
+                    ) : (
+                      <PlayIcon className="w-5 h-5" />
+                    )}
+                  </button>
+                  <button
+                    onClick={async () => {
+                      const url = song.vocalsUrl || song.compositionUrl
+                      if (!url) return
+                      try {
+                        const response = await fetch(url)
+                        const blob = await response.blob()
+                        const blobUrl = URL.createObjectURL(blob)
+                        const link = document.createElement('a')
+                        link.href = blobUrl
+                        link.download = `${song.title || 'song'}.mp3`
+                        document.body.appendChild(link)
+                        link.click()
+                        document.body.removeChild(link)
+                        URL.revokeObjectURL(blobUrl)
+                      } catch (err) {
+                        window.open(url, '_blank')
+                      }
+                    }}
+                    className="p-2 rounded-full bg-gray-50 text-gray-600 hover:bg-gray-100 transition"
+                    title="Download Song"
+                  >
+                    <DownloadIcon className="w-5 h-5" />
+                  </button>
+                </div>
               </motion.div>
             ))}
           </AnimatePresence>

@@ -2,12 +2,14 @@ import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { getUserSongs } from '../services/api'
 import LoadingSpinner from '../components/common/LoadingSpinner'
-import { Trash2Icon, Edit3Icon, DownloadIcon } from 'lucide-react'
+import { Trash2Icon, Edit3Icon, DownloadIcon, PlayIcon, PauseIcon } from 'lucide-react'
 import '../css/MySongs.css'
 
 export default function MySongs() {
   const [songs, setSongs] = useState([])
   const [loading, setLoading] = useState(true)
+  const [playingUrl, setPlayingUrl] = useState(null)
+  const [audio] = useState(() => new Audio())
 
   useEffect(() => {
     getUserSongs().then(res => {
@@ -15,6 +17,27 @@ export default function MySongs() {
       setLoading(false)
     })
   }, [])
+
+  useEffect(() => {
+    const handleEnded = () => setPlayingUrl(null)
+    audio.addEventListener('ended', handleEnded)
+    return () => {
+      audio.removeEventListener('ended', handleEnded)
+      audio.pause()
+    }
+  }, [audio])
+
+  const handlePlayToggle = (url) => {
+    if (!url) return
+    if (playingUrl === url) {
+      audio.pause()
+      setPlayingUrl(null)
+    } else {
+      audio.src = url
+      audio.play().catch(e => console.error("Playback failed:", e))
+      setPlayingUrl(url)
+    }
+  }
 
   const handleDelete = (id) => {
     // In real app, call DELETE /api/user/songs/:id
@@ -44,10 +67,45 @@ export default function MySongs() {
               <div className="p-4">
                 <h3 className="font-bold text-lg truncate">{song.title}</h3>
                 <p className="text-xs text-gray-400 mt-1">{song.createdAt}</p>
-                <div className="flex justify-between mt-4">
-                  <button className="p-2 rounded-lg hover:bg-gray-100"><Edit3Icon className="w-4 h-4" /></button>
-                  <button className="p-2 rounded-lg hover:bg-gray-100"><DownloadIcon className="w-4 h-4" /></button>
-                  <button onClick={() => handleDelete(song.id)} className="p-2 rounded-lg hover:bg-red-50 text-red-500"><Trash2Icon className="w-4 h-4" /></button>
+                 <div className="flex justify-between items-center mt-4">
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handlePlayToggle(song.vocalsUrl || song.compositionUrl)}
+                      className={`p-2 rounded-lg transition ${playingUrl === (song.vocalsUrl || song.compositionUrl) ? 'bg-indigo-50 text-indigo-600' : 'hover:bg-gray-100 text-gray-600'}`}
+                      title="Play / Pause"
+                    >
+                      {playingUrl === (song.vocalsUrl || song.compositionUrl) ? (
+                        <PauseIcon className="w-4 h-4" />
+                      ) : (
+                        <PlayIcon className="w-4 h-4" />
+                      )}
+                    </button>
+                    <button
+                      onClick={async () => {
+                        const url = song.vocalsUrl || song.compositionUrl
+                        if (!url) return
+                        try {
+                          const response = await fetch(url)
+                          const blob = await response.blob()
+                          const blobUrl = URL.createObjectURL(blob)
+                          const link = document.createElement('a')
+                          link.href = blobUrl
+                          link.download = `${song.title || 'song'}.mp3`
+                          document.body.appendChild(link)
+                          link.click()
+                          document.body.removeChild(link)
+                          URL.revokeObjectURL(blobUrl)
+                        } catch (err) {
+                          window.open(url, '_blank')
+                        }
+                      }}
+                      className="p-2 rounded-lg hover:bg-gray-100 text-gray-600"
+                      title="Download Song"
+                    >
+                      <DownloadIcon className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <button onClick={() => handleDelete(song.id)} className="p-2 rounded-lg hover:bg-red-50 text-red-500" title="Delete Song"><Trash2Icon className="w-4 h-4" /></button>
                 </div>
               </div>
             </motion.div>
