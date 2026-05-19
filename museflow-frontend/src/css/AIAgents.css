@@ -1,0 +1,71 @@
+/* AIAgents.css – agent cards with status glow */
+
+.agents-header {
+  text-align: center;
+  margin-bottom: 3rem;
+}
+
+.agents-title {
+  font-size: 2.5rem;
+  font-weight: 700;
+  background: linear-gradient(135deg, #0f172a, #3b82f6);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+}
+
+.agents-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 1.8rem;
+}
+
+.agent-card {
+  background: rgba(255,255,255,0.8);
+  backdrop-filter: blur(2px);
+  border-radius: 2rem;
+  padding: 1.5rem;
+  border: 1px solid rgba(0,0,0,0.05);
+  transition: all 0.3s;
+  animation: agentEntry 0.5s ease-out;
+}
+.agent-card:hover {
+  transform: scale(1.02);
+  background: white;
+  box-shadow: 0 15px 25px -12px rgba(0,0,0,0.1);
+}
+
+@keyframes agentEntry {
+  from { opacity: 0; transform: translateY(15px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.agent-status {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 0 2px rgba(16,185,129,0.2);
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(16,185,129,0.4); }
+  70% { box-shadow: 0 0 0 6px rgba(16,185,129,0); }
+  100% { box-shadow: 0 0 0 0 rgba(16,185,129,0); }
+}
+
+.agent-name {
+  font-size: 1.35rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.agent-description {
+  color: #4b5563;
+  margin-top: 0.75rem;
+  font-size: 0.9rem;
+}

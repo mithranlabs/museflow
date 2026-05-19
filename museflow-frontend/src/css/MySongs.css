@@ -1,0 +1,78 @@
+/* MySongs.css – card gallery for saved songs */
+
+.songs-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 2rem;
+  margin-top: 2rem;
+}
+
+.song-card {
+  background: white;
+  border-radius: 1.5rem;
+  overflow: hidden;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+  border: 1px solid #f0f0f0;
+  animation: cardRise 0.5s ease-out;
+}
+
+@keyframes cardRise {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.song-card:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 20px 25px -12px rgba(0,0,0,0.1);
+  border-color: #cbd5e1;
+}
+
+.song-card-image {
+  height: 180px;
+  width: 100%;
+  object-fit: cover;
+  transition: transform 0.5s;
+}
+.song-card:hover .song-card-image {
+  transform: scale(1.02);
+}
+
+.song-card-content {
+  padding: 1.2rem;
+}
+
+.song-card-title {
+  font-weight: 700;
+  font-size: 1.2rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.song-card-date {
+  font-size: 0.75rem;
+  color: #9ca3af;
+  margin-top: 0.25rem;
+}
+
+.card-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  justify-content: flex-end;
+}
+
+.card-action-btn {
+  background: none;
+  border: none;
+  padding: 0.4rem;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: 0.2s;
+  color: #6b7280;
+}
+.card-action-btn:hover {
+  background: #f3f4f6;
+  color: #4f46e5;
+}

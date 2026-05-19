@@ -61,6 +61,48 @@ app.post('/api/orchestrate', async (req, res) => {
   }
 });
 
+// ── 1b. Frontend-compatible orchestration ──────────────────────────────────────
+
+app.post('/api/muse/generate', async (req, res) => {
+  const { prompt, emotion, mood, story, genre, userId = 'default-user' } = req.body;
+
+  if (!prompt) {
+    return res.status(400).json({ error: 'Creative direction prompt (prompt) is required.' });
+  }
+
+  try {
+    const result = await orchestrator.runWorkflow(
+      {
+        direction: prompt,
+        emotion: emotion || mood || 'melancholic',
+        vibe: mood || 'nostalgic',
+        story,
+        genre
+      },
+      userId
+    );
+
+    // Map FinalCreativePackage to frontend's expected properties
+    const frontendData = {
+      id: `song-${Date.now()}`,
+      songTitle: result.package.title,
+      lyrics: result.package.lyrics,
+      coverArtUrl: result.package.albumArtUrl,
+      productionStyle: result.package.productionNotes || result.package.arrangementNotes || 'Ambient Synthwave',
+      vocalsUrl: result.package.generatedAudioUrl,
+      compositionUrl: result.package.allVariations?.[0]?.audioUrl || result.package.generatedAudioUrl
+    };
+
+    res.json(frontendData);
+  } catch (error: any) {
+    console.error('[Frontend Generate Error]:', error);
+    res.status(500).json({
+      message: 'Orchestration workflow failed.',
+      details: error.message
+    });
+  }
+});
+
 // ── 2. Execution traces history ───────────────────────────────────────────────
 
 app.get('/api/history', (_req, res) => {
@@ -77,6 +119,149 @@ app.get('/api/history', (_req, res) => {
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
+});
+
+// ── 2b. Frontend Playlist / Song library persistence ─────────────────────────────
+
+app.get('/api/user/songs', (_req, res) => {
+  const songsFile = path.join(process.cwd(), 'artifacts', 'user_songs.json');
+  if (!fs.existsSync(songsFile)) {
+    return res.json([]);
+  }
+  try {
+    const data = JSON.parse(fs.readFileSync(songsFile, 'utf-8'));
+    res.json(data);
+  } catch (err: any) {
+    res.json([]);
+  }
+});
+
+app.post('/api/user/songs/save', (req, res) => {
+  const songsFile = path.join(process.cwd(), 'artifacts', 'user_songs.json');
+  let songs: any[] = [];
+  if (fs.existsSync(songsFile)) {
+    try {
+      songs = JSON.parse(fs.readFileSync(songsFile, 'utf-8'));
+    } catch (err) {}
+  }
+
+  const newSong = {
+    id: req.body.id || `song-${Date.now()}`,
+    title: req.body.songTitle || req.body.title || 'Untitled',
+    songTitle: req.body.songTitle || req.body.title || 'Untitled',
+    lyrics: req.body.lyrics || '',
+    compositionUrl: req.body.compositionUrl || req.body.vocalsUrl || '',
+    vocalsUrl: req.body.vocalsUrl || '',
+    coverArtUrl: req.body.coverArtUrl || '',
+    productionStyle: req.body.productionStyle || '',
+    createdAt: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+  };
+
+  songs.push(newSong);
+  fs.mkdirSync(path.dirname(songsFile), { recursive: true });
+  fs.writeFileSync(songsFile, JSON.stringify(songs, null, 2));
+  res.json(newSong);
+});
+
+// ── 2c. Frontend Agents Status ──────────────────────────────────────────────────
+
+app.get('/api/agents/status', (_req, res) => {
+  res.json([
+    {
+      name: 'HindsightMemory',
+      status: 'active',
+      description: 'Tracks user preferences across sessions.',
+      lastActive: 'Just now'
+    },
+    {
+      name: 'EmotionAgent',
+      status: 'active',
+      description: 'Analyzes prompt emotional cues and energy levels.',
+      lastActive: 'Just now'
+    },
+    {
+      name: 'LyricsAgent',
+      status: 'active',
+      description: 'Generates themed poetic lyrics.',
+      lastActive: 'Just now'
+    },
+    {
+      name: 'CompositionAgent',
+      status: 'active',
+      description: 'Plans BPM, key, instruments, and vocal styles.',
+      lastActive: 'Just now'
+    },
+    {
+      name: 'ProducerAgent',
+      status: 'active',
+      description: 'Determines mixing and layering effects.',
+      lastActive: 'Just now'
+    },
+    {
+      name: 'VocalStylingAgent',
+      status: 'active',
+      description: 'Details voice type and delivery style.',
+      lastActive: 'Just now'
+    },
+    {
+      name: 'MusicGenerationAgent',
+      status: 'active',
+      description: 'Generates instrumentals via Loudly.',
+      lastActive: 'Just now'
+    },
+    {
+      name: 'VocalService',
+      status: 'active',
+      description: 'Generates spoken/singing vocals via MeloTTS/ElevenLabs.',
+      lastActive: 'Just now'
+    },
+    {
+      name: 'AudioMixer',
+      status: 'active',
+      description: 'Assembles and blends final tracks via FFmpeg.',
+      lastActive: 'Just now'
+    },
+    {
+      name: 'CriticAgent',
+      status: 'active',
+      description: 'Evaluates cohesion and triggers refinement passes.',
+      lastActive: 'Just now'
+    }
+  ]);
+});
+
+// ── 2d. Frontend User Profile & Settings ─────────────────────────────────────────
+
+app.get('/api/user/profile', (_req, res) => {
+  const mem = new HindsightMemory('default-user');
+  const prefs = mem.getPreferences();
+
+  const songsFile = path.join(process.cwd(), 'artifacts', 'user_songs.json');
+  let totalSongs = 0;
+  if (fs.existsSync(songsFile)) {
+    try {
+      const songs = JSON.parse(fs.readFileSync(songsFile, 'utf-8'));
+      totalSongs = songs.length;
+    } catch (err) {}
+  }
+
+  res.json({
+    displayName: 'Default Creator',
+    email: 'creator@museflow.ai',
+    totalSongs,
+    memberSince: 'May 2026',
+    memoryInsights: {
+      favoriteGenres: prefs.preferredGenres && prefs.preferredGenres.length > 0 ? prefs.preferredGenres : ['synthwave', 'lo-fi'],
+      preferredInstruments: prefs.vocalPreferences && prefs.vocalPreferences.length > 0 ? prefs.vocalPreferences : ['Piano', 'Pad synth']
+    }
+  });
+});
+
+app.put('/api/user/settings', (req, res) => {
+  const settingsFile = path.join(process.cwd(), 'artifacts', 'user_settings.json');
+  fs.mkdirSync(path.dirname(settingsFile), { recursive: true });
+  fs.writeFileSync(settingsFile, JSON.stringify(req.body, null, 2));
+  res.json(req.body);
 });
 
 // ── 3. Hindsight memory routes ────────────────────────────────────────────────

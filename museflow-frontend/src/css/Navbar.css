@@ -1,0 +1,71 @@
+/* Navbar.css – matches the image's header style */
+
+/* Override the existing navbar */
+nav.sticky {
+  background: rgba(11, 12, 16, 0.8) !important;
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Logo styling */
+nav .flex.items-center .font-bold,
+nav [class*="gradient-text"] {
+  background: linear-gradient(45deg, #5b86e5, #36d1dc);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  font-size: 1.5rem;
+  font-weight: bold;
+}
+
+/* Navigation links container */
+nav .hidden.md\\:flex {
+  gap: 1.5rem;
+}
+
+/* Individual links (NavLink) */
+nav a {
+  color: #b3b3b3 !important;
+  text-decoration: none;
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: color 0.2s ease;
+  position: relative;
+  padding: 0.5rem 0;
+}
+
+nav a:hover {
+  color: #ffffff !important;
+}
+
+/* Active link indicator */
+nav a.active {
+  color: #ffffff !important;
+}
+
+nav a.active::after,
+nav a:hover::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, #5b86e5, #36d1dc);
+  border-radius: 2px;
+}
+
+/* Mobile menu button (hamburger) – optional */
+nav .md\\:hidden button {
+  color: #b3b3b3;
+}
+nav .md\\:hidden button:hover {
+  color: #ffffff;
+}
+
+/* Mobile menu dropdown */
+nav .md\\:hidden + div {
+  background: rgba(11, 12, 16, 0.95);
+  backdrop-filter: blur(12px);
+  border-top: 1px solid rgba(255,255,255,0.05);
+}

@@ -1,0 +1,68 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Light mode (default) */
+:root {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f9fafb;
+  --text-primary: #111827;
+  --text-secondary: #4b5563;
+  --card-bg: #ffffff;
+  --border-color: #e5e7eb;
+  --input-bg: #ffffff;
+  --navbar-bg: rgba(255,255,255,0.8);
+}
+
+/* Dark mode */
+.dark {
+  --bg-primary: #0f172a;
+  --bg-secondary: #1e293b;
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --card-bg: #1e293b;
+  --border-color: #334155;
+  --input-bg: #0f172a;
+  --navbar-bg: rgba(15,23,42,0.9);
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  transition: background-color 0.3s ease, color 0.2s ease;
+}
+
+/* Apply to all major elements */
+.bg-white, .bg-gray-50, .bg-gray-100 {
+  background-color: var(--card-bg) !important;
+}
+.text-gray-600, .text-gray-500, .text-gray-700 {
+  color: var(--text-secondary) !important;
+}
+.text-gray-900, .text-gray-800 {
+  color: var(--text-primary) !important;
+}
+.border, .border-gray-200, .border-gray-100 {
+  border-color: var(--border-color) !important;
+}
+input, textarea, select {
+  background-color: var(--input-bg);
+  color: var(--text-primary);
+  border-color: var(--border-color);
+}
+nav {
+  background-color: var(--navbar-bg) !important;
+  backdrop-filter: blur(12px);
+}
+
+/* Keep gradient text vibrant in dark mode */
+.gradient-text {
+  background: linear-gradient(135deg, #4f46e5, #a855f7, #ec4899);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Animations (keep previous animations here as well) */
+/* ... your existing keyframes and animations ... */
